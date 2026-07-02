@@ -7,7 +7,11 @@ stubs/
 *.obj
 *.glb
 *.gltf
+*.stl
+*.3mf
 .DS_Store
 progress-assets/
 PROGRESS.md
 deps/
+model_output/
+output_3d*.png

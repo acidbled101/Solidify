@@ -18,6 +18,9 @@ dependencies = [
     "trimesh",
     "scipy",
     "tqdm",
+    "fast-simplification",
+    "scikit-image",
+    "rtree",
 ]
 
 [project.scripts]

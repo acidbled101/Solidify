@@ -63,6 +63,10 @@ def main():
         "--steps", type=int, default=None,
         help="Override sampler steps for all three flow phases (default: pipeline JSON, usually 12)",
     )
+    parser.add_argument(
+        "--target-faces", type=int, default=200000,
+        help="Pre-bake simplification target face count (default: 200000)",
+    )
     args = parser.parse_args()
 
     if not os.path.exists(args.image):
@@ -208,7 +212,7 @@ def main():
                 import fast_simplification
                 verts_np = mesh_out.vertices.cpu().numpy()
                 faces_np = mesh_out.faces.cpu().numpy()
-                target_faces = min(200000, len(faces_np))
+                target_faces = min(args.target_faces, len(faces_np))
                 if len(faces_np) > target_faces:
                     ratio = 1.0 - (target_faces / len(faces_np))
                     print(f"  Simplifying mesh: {len(faces_np):,} -> ~{target_faces:,} faces")
@@ -251,7 +255,7 @@ def main():
 
             # Simplify before UV unwrap — xatlas is very slow on 800K+ vertex meshes
             bake_verts, bake_faces = verts, faces
-            target_faces = min(200000, len(faces))
+            target_faces = min(args.target_faces, len(faces))
             if len(faces) > target_faces:
                 try:
                     import fast_simplification
