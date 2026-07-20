@@ -50,3 +50,17 @@ ALLOWED_TEXTURE_SIZES = (512, 1024, 2048)
 # When True, API error responses include full tracebacks. Off by default so we
 # don't dump internals to LAN users.
 DEBUG = _as_bool(os.environ.get("TRELLIS_DEBUG", "0"))
+
+# --- Auth (only relevant if this server is reachable beyond your own LAN) ---
+# Off by default (matches the local/LAN-only design). Setting TRELLIS_AUTH_PASSWORD
+# turns on HTTP Basic Auth for every route, including the static frontend --
+# required before tunneling/exposing this to the internet, since job submission
+# has no other rate limiting and ties up the one GPU on this Mac for minutes.
+AUTH_USER = os.environ.get("TRELLIS_AUTH_USER", "admin")
+AUTH_PASSWORD = os.environ.get("TRELLIS_AUTH_PASSWORD", "")
+AUTH_ENABLED = bool(AUTH_PASSWORD)
+
+# Hard cap on queued (not yet started) jobs. Once reached, new submissions are
+# rejected with 429 instead of piling up indefinitely -- relevant once the
+# server is reachable by more than just people you trust.
+MAX_QUEUE_DEPTH = int(os.environ.get("TRELLIS_MAX_QUEUE_DEPTH", "10"))

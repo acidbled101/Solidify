@@ -9,15 +9,17 @@ setup run before torch is loaded.
 # MUST be first: sets env vars + sys.path before torch is imported anywhere.
 import trellis_core  # noqa: F401,E402
 
+import hmac
 import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import FastAPI, File, Form, Request, UploadFile
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from PIL import Image as PILImage
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from . import config, worker
 from .jobs import JobStore
@@ -35,11 +37,55 @@ async def lifespan(app: FastAPI):
     config.JOBS_DIR.mkdir(parents=True, exist_ok=True)
     worker.start_worker(store)
     worker.warm_pipeline_async()
-    log.info("Server started. Model=%s device=%s", config.MODEL_ID, config.DEVICE)
+    if config.AUTH_ENABLED:
+        log.info("Server started. Model=%s device=%s auth=on (user=%s)", config.MODEL_ID, config.DEVICE, config.AUTH_USER)
+    else:
+        log.warning(
+            "Server started with NO AUTH (Model=%s device=%s). Fine on a trusted "
+            "LAN; set TRELLIS_AUTH_PASSWORD before exposing this beyond your own "
+            "network (e.g. via a tunnel).",
+            config.MODEL_ID, config.DEVICE,
+        )
     yield
 
 
 app = FastAPI(title="TRELLIS.2 image-to-3D", lifespan=lifespan)
+
+
+class BasicAuthMiddleware(BaseHTTPMiddleware):
+    """Protects every route (including the static frontend) with HTTP Basic
+    Auth, but only when config.AUTH_ENABLED -- i.e. only once TRELLIS_AUTH_PASSWORD
+    is set. No-op on a bare LAN setup, matching the original no-auth default."""
+
+    async def dispatch(self, request: Request, call_next):
+        if not config.AUTH_ENABLED:
+            return await call_next(request)
+
+        auth = request.headers.get("authorization", "")
+        ok = False
+        if auth.startswith("Basic "):
+            try:
+                import base64
+
+                decoded = base64.b64decode(auth[6:]).decode("utf-8")
+                user, _, password = decoded.partition(":")
+                # Constant-time compare on both fields to avoid a timing oracle.
+                ok = hmac.compare_digest(user, config.AUTH_USER) and hmac.compare_digest(
+                    password, config.AUTH_PASSWORD
+                )
+            except Exception:
+                ok = False
+
+        if not ok:
+            return Response(
+                status_code=401,
+                headers={"WWW-Authenticate": 'Basic realm="TRELLIS.2"'},
+                content="Authentication required.",
+            )
+        return await call_next(request)
+
+
+app.add_middleware(BasicAuthMiddleware)
 
 
 # --------------------------------------------------------------------------
@@ -73,6 +119,9 @@ async def create_job(
     target_faces: str = Form(None),
     skip_printable: str = Form(None),
 ):
+    if worker.queue_depth() >= config.MAX_QUEUE_DEPTH:
+        return _error(429, f"Queue is full ({config.MAX_QUEUE_DEPTH} jobs waiting). Try again shortly.")
+
     # Read + size-limit the upload.
     image_bytes = await image.read()
     if not image_bytes:
