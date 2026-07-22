@@ -53,12 +53,21 @@ app = FastAPI(title="TRELLIS.2 image-to-3D", lifespan=lifespan)
 
 
 class BasicAuthMiddleware(BaseHTTPMiddleware):
-    """Protects every route (including the static frontend) with HTTP Basic
-    Auth, but only when config.AUTH_ENABLED -- i.e. only once TRELLIS_AUTH_PASSWORD
-    is set. No-op on a bare LAN setup, matching the original no-auth default."""
+    """Protects the API with HTTP Basic Auth, but only when config.AUTH_ENABLED
+    -- i.e. only once TRELLIS_AUTH_PASSWORD is set. No-op on a bare LAN setup,
+    matching the original no-auth default.
+
+    The static shell (`/` and `/static/*`) is served unauthenticated so the
+    branded SOLIDIFY login page can load; that page then signs in by sending the
+    same Basic credentials to `/api/*`, which stay gated. This makes the branded
+    login the real gate instead of the browser's native Basic-Auth popup."""
 
     async def dispatch(self, request: Request, call_next):
         if not config.AUTH_ENABLED:
+            return await call_next(request)
+
+        path = request.url.path
+        if path == "/" or path == "/static" or path.startswith("/static/"):
             return await call_next(request)
 
         auth = request.headers.get("authorization", "")
