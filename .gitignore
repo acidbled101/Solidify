@@ -14,4 +14,8 @@ progress-assets/
 PROGRESS.md
 deps/
 model_output/
+jobs/
 output_3d*.png
+
+# Home hero 3D asset (intentional UI asset, NOT generated job output)
+!server/static/assets/specimen-042.stl

@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SOLIDIFY · Photo in. Matter out.</title>
+  <!-- Import map so the three.js example loaders (GLTFLoader / STLLoader), which
+       do `import ... from "three"`, resolve to the same module the viewer imports. -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.module.js"
+    }
+  }
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
+  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/three@0.134.0/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/vanta@0.5.24/dist/vanta.net.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/ScrollTrigger.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lenis@1.1.14/dist/lenis.min.js"></script>
+  <script src="/static/fx.js"></script>
+  <script src="/static/model-preview.js"></script>
+  <style>
+    html, body { margin: 0; padding: 0; background: #010807; color: #EAFDFB; font-family: 'Chakra Petch', sans-serif; }
+    a { color: #35F2E2; text-decoration: none; }
+    a:hover { color: #7CFFF1; }
+    * { box-sizing: border-box; }
+    input, select, button, textarea { font-family: inherit; }
+
+    @keyframes ledpulse { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
+    @keyframes blinkc { 0%,49% { opacity: 1; } 50%,100% { opacity: 0; } }
+    @keyframes nflick { 0%,88%,100% { opacity: .95; } 90% { opacity: .2; } 93% { opacity: .8; } 96% { opacity: .35; } 98% { opacity: .95; } }
+    @keyframes scanmove { from { top: -35%; } to { top: 130%; } }
+    @keyframes rise { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+    @keyframes glowpulse { 0%,100% { box-shadow: 0 0 6px rgba(53,242,226,.7); } 50% { box-shadow: 0 0 18px rgba(53,242,226,1); } }
+    @keyframes stripes { from { background-position: 0 0; } to { background-position: 28px 0; } }
+    @keyframes photoscan { 0% { top: 2%; } 50% { top: 96%; } 100% { top: 2%; } }
+    @keyframes floaty { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-12px); } }
+    /* Login specimen: reveal the 3D-reconstructed biker top-down as the scan line
+       descends (0→50%), then retract as it climbs back (50→100%). Same 6s
+       ease-in-out timing as .photoscan so the clip edge tracks the line. */
+    /* Login specimen 2D↔3D swap, synced to the scan line.
+       --scanpos is an animatable typed percentage that tracks the scan line's
+       vertical position (same 2%→96% path, same 6s ease-in-out). Each image is
+       masked by a soft gradient centred on --scanpos, so the two cross-fade
+       exactly where the line is: 3D fades IN above the line, 2D fades OUT above it.
+       A ~10% band (±5%) gives the soft fade rather than a hard edge. */
+    @property --scanpos { syntax: "<percentage>"; inherits: false; initial-value: 2%; }
+    @keyframes scanpos { 0% { --scanpos: 2%; } 50% { --scanpos: 96%; } 100% { --scanpos: 2%; } }
+    .biker-3d {
+      -webkit-mask-image: linear-gradient(to bottom, #000 calc(var(--scanpos) - 5%), transparent calc(var(--scanpos) + 5%));
+      mask-image: linear-gradient(to bottom, #000 calc(var(--scanpos) - 5%), transparent calc(var(--scanpos) + 5%));
+      animation: scanpos 6s ease-in-out infinite;
+    }
+    .biker-2d {
+      -webkit-mask-image: linear-gradient(to bottom, transparent calc(var(--scanpos) - 5%), #000 calc(var(--scanpos) + 5%));
+      mask-image: linear-gradient(to bottom, transparent calc(var(--scanpos) - 5%), #000 calc(var(--scanpos) + 5%));
+      animation: scanpos 6s ease-in-out infinite;
+    }
+
+    /* Hover / focus behaviours (replace the design prototype's style-hover / style-focus attrs).
+       !important so they win over the element's inline base styles. */
+    .h-primary { transition: background .15s, box-shadow .15s; }
+    .h-primary:hover { background: #7CFFF1 !important; box-shadow: 0 0 54px rgba(53,242,226,.75) !important; }
+    .h-ghost { transition: border-color .15s, box-shadow .15s, color .15s; }
+    .h-ghost:hover { border-color: #35F2E2 !important; color: #35F2E2 !important; box-shadow: 0 0 20px rgba(53,242,226,.3) !important; }
+    .h-nav { transition: color .15s; }
+    .h-nav:hover { color: #7CFFF1 !important; }
+    .h-card { transition: background .2s; }
+    .h-card:hover { background: #041a17 !important; }
+    .h-danger { transition: background .15s, box-shadow .15s; }
+    .h-danger:hover { background: #ff7a8a !important; }
+    .h-remove { transition: border-color .15s, color .15s; }
+    .h-remove:hover { border-color: #FF5468 !important; color: #FF5468 !important; }
+    .field { transition: border-color .15s, box-shadow .15s; }
+    .field:focus { border-color: #35F2E2 !important; box-shadow: 0 0 0 1px #35F2E2, 0 0 22px rgba(53,242,226,.25) !important; outline: none; }
+
+    /* Lenis smooth-scroll (recommended base styles). */
+    html.lenis, html.lenis body { height: auto; }
+    .lenis.lenis-smooth { scroll-behavior: auto !important; }
+    .lenis.lenis-smooth [data-lenis-prevent] { overscroll-behavior: contain; }
+    .lenis.lenis-stopped { overflow: hidden; }
+
+    /* SpotlightCard — a pointer-following cyan glow (react-bits style). The glow
+       sits above the card's own background but below content, so text stays crisp. */
+    [data-spot] { position: relative; isolation: isolate; }
+    [data-spot]::before {
+      content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+      opacity: var(--spot, 0); transition: opacity .35s ease;
+      background: radial-gradient(340px circle at var(--mx, 50%) var(--my, 50%), rgba(53,242,226,.16), transparent 60%);
+    }
+    [data-magnet] { will-change: transform; }
+
+    /* Motion reduction: honour the OS/browser preference. */
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; }
+    }
+  </style>
+</head>
+<body>
+  <div id="app" style="min-height:100vh;background:#010807"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

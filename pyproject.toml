@@ -21,6 +21,9 @@ dependencies = [
     "fast-simplification",
     "scikit-image",
     "rtree",
+    "fastapi",
+    "uvicorn[standard]",
+    "python-multipart",
 ]
 
 [project.scripts]
