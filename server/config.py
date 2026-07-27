@@ -21,7 +21,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 MODEL_ID = os.environ.get("TRELLIS_MODEL_ID", "microsoft/TRELLIS.2-4B")
 DEVICE = os.environ.get("TRELLIS_DEVICE", "mps")
 DEFAULT_PIPELINE_TYPE = os.environ.get("TRELLIS_PIPELINE_TYPE", "1024_cascade")
-DEFAULT_TARGET_FACES = int(os.environ.get("TRELLIS_TARGET_FACES", "500000"))
+DEFAULT_TARGET_FACES = int(os.environ.get("TRELLIS_TARGET_FACES", "1000000"))
 DEFAULT_SEED = int(os.environ.get("TRELLIS_SEED", "42"))
 DEFAULT_TEXTURE_SIZE = int(os.environ.get("TRELLIS_TEXTURE_SIZE", "2048"))
 
@@ -43,6 +43,15 @@ PORT = int(os.environ.get("TRELLIS_PORT", "8000"))
 JOBS_DIR = Path(os.environ.get("TRELLIS_JOBS_DIR", str(REPO_ROOT / "jobs")))
 MAX_UPLOAD_MB = int(os.environ.get("TRELLIS_MAX_UPLOAD_MB", "20"))
 
+# --- Local database ---------------------------------------------------------
+# One SQLite file on this Mac: the operator allow-list + a persistent archive of
+# every completed generation. See server/db.py.
+DB_PATH = Path(os.environ.get("TRELLIS_DB_PATH", str(REPO_ROOT / "trellis.db")))
+
+# Shown as the per-job time estimate ("~N MIN") until enough real jobs exist for
+# the live DB average to take over.
+DEFAULT_JOB_MINUTES = float(os.environ.get("TRELLIS_DEFAULT_JOB_MINUTES", "6"))
+
 # --- Validation allowlists --------------------------------------------------
 ALLOWED_PIPELINE_TYPES = ("512", "1024", "1024_cascade")
 ALLOWED_TEXTURE_SIZES = (512, 1024, 2048)
@@ -51,14 +60,22 @@ ALLOWED_TEXTURE_SIZES = (512, 1024, 2048)
 # don't dump internals to LAN users.
 DEBUG = _as_bool(os.environ.get("TRELLIS_DEBUG", "0"))
 
-# --- Auth (only relevant if this server is reachable beyond your own LAN) ---
-# Off by default (matches the local/LAN-only design). Setting TRELLIS_AUTH_PASSWORD
-# turns on HTTP Basic Auth for every route, including the static frontend --
-# required before tunneling/exposing this to the internet, since job submission
-# has no other rate limiting and ties up the one GPU on this Mac for minutes.
-AUTH_USER = os.environ.get("TRELLIS_AUTH_USER", "admin")
-AUTH_PASSWORD = os.environ.get("TRELLIS_AUTH_PASSWORD", "")
-AUTH_ENABLED = bool(AUTH_PASSWORD)
+# --- Auth -------------------------------------------------------------------
+# Authentication is now driven by the operators table in the local DB (managed
+# with `python -m server.admin`), NOT by these env vars:
+#   * 0 operators  -> open "bootstrap" mode (so you can't lock yourself out).
+#   * >= 1 operator -> every /api/* route requires a real login.
+# See server/main.py (auth middleware) and server/db.py.
+#
+# TRELLIS_AUTH_USER / TRELLIS_AUTH_PASSWORD are kept ONLY as an optional
+# convenience: if both are set and the operators table is still empty at
+# startup, that one account is seeded automatically (handy for launchd). After
+# that, manage operators with the admin CLI.
+AUTH_SEED_USER = os.environ.get("TRELLIS_AUTH_USER", "")
+AUTH_SEED_PASSWORD = os.environ.get("TRELLIS_AUTH_PASSWORD", "")
+
+# How long a login token stays valid before the operator must sign in again.
+SESSION_TTL_DAYS = int(os.environ.get("TRELLIS_SESSION_TTL_DAYS", "30"))
 
 # Hard cap on queued (not yet started) jobs. Once reached, new submissions are
 # rejected with 429 instead of piling up indefinitely -- relevant once the

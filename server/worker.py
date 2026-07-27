@@ -22,7 +22,7 @@ import threading
 import time
 import traceback
 
-from . import config
+from . import config, db
 from .jobs import Job, JobStore, JobStatus
 
 log = logging.getLogger("trellis.worker")
@@ -186,13 +186,35 @@ def _run_job(store: JobStore, job_id: str) -> None:
         "watertight": getattr(printable, "watertight", None) if not params.get("skip_printable") else None,
     }
 
-    store.update(
+    job = store.update(
         job_id,
         status=JobStatus.DONE,
         result=result,
         diagnostics=diagnostics,
         fidelity=fidelity,
     )
+
+    # Persist to the shared, on-disk archive (Library) so completed models
+    # survive restarts. Wrapped so a DB hiccup can never break generation --
+    # the worker's core invariant is that a finished job stays finished.
+    try:
+        title = os.path.splitext(os.path.basename(job.input_image_path))[0] or "model"
+        db.upsert_model(
+            job_id=job_id,
+            operator=getattr(job, "operator", "anonymous"),
+            title=title,
+            created_at=job.created_at,
+            duration_seconds=round(job.updated_at - job.created_at, 1),
+            params=params,
+            vertices=gen.vertex_count,
+            faces=gen.face_count,
+            watertight=result.get("watertight"),
+            files=files,
+            preview_filename=preview,
+            status="done",
+        )
+    except Exception:  # noqa: BLE001
+        log.exception("Failed to persist model %s to the library DB", job_id)
 
 
 def _record_timing(store: JobStore, job_id: str, key: str, seconds: float) -> None:

@@ -38,8 +38,8 @@ def main():
         help="Override sampler steps for all three flow phases (default: pipeline JSON, usually 12)",
     )
     parser.add_argument(
-        "--target-faces", type=int, default=500000,
-        help="Pre-bake simplification target face count (default: 500000)",
+        "--target-faces", type=int, default=1000000,
+        help="Pre-bake simplification target face count (default: 1000000)",
     )
     parser.add_argument(
         "--model-id", default="microsoft/TRELLIS.2-4B",

@@ -3,236 +3,105 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>TRELLIS.2 &middot; Image to Printable 3D</title>
-  <script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
+  <title>SOLIDIFY · Photo in. Matter out.</title>
+  <!-- Import map so the three.js example loaders (GLTFLoader / STLLoader), which
+       do `import ... from "three"`, resolve to the same module the viewer imports. -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.module.js"
+    }
+  }
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
+  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/three@0.134.0/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/vanta@0.5.24/dist/vanta.net.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/ScrollTrigger.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lenis@1.1.14/dist/lenis.min.js"></script>
+  <script src="/static/fx.js"></script>
+  <script src="/static/model-preview.js"></script>
   <style>
-    :root {
-      --bg: #0f1216;
-      --panel: #171b22;
-      --panel-2: #1e232c;
-      --border: #2a313c;
-      --text: #e6e9ee;
-      --muted: #97a1b0;
-      --accent: #5b8cff;
-      --accent-2: #3f6fe0;
-      --ok: #3ecf8e;
-      --warn: #f0a02f;
-      --err: #ff6b6b;
-      --radius: 12px;
-    }
+    html, body { margin: 0; padding: 0; background: #010807; color: #EAFDFB; font-family: 'Chakra Petch', sans-serif; }
+    a { color: #35F2E2; text-decoration: none; }
+    a:hover { color: #7CFFF1; }
     * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      background: radial-gradient(1200px 600px at 20% -10%, #1a2130 0%, var(--bg) 60%);
-      color: var(--text);
-      min-height: 100vh;
-      line-height: 1.5;
+    input, select, button, textarea { font-family: inherit; }
+
+    @keyframes ledpulse { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
+    @keyframes blinkc { 0%,49% { opacity: 1; } 50%,100% { opacity: 0; } }
+    @keyframes nflick { 0%,88%,100% { opacity: .95; } 90% { opacity: .2; } 93% { opacity: .8; } 96% { opacity: .35; } 98% { opacity: .95; } }
+    @keyframes scanmove { from { top: -35%; } to { top: 130%; } }
+    @keyframes rise { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+    @keyframes glowpulse { 0%,100% { box-shadow: 0 0 6px rgba(53,242,226,.7); } 50% { box-shadow: 0 0 18px rgba(53,242,226,1); } }
+    @keyframes stripes { from { background-position: 0 0; } to { background-position: 28px 0; } }
+    @keyframes photoscan { 0% { top: 2%; } 50% { top: 96%; } 100% { top: 2%; } }
+    @keyframes floaty { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-12px); } }
+    /* Login specimen: reveal the 3D-reconstructed biker top-down as the scan line
+       descends (0→50%), then retract as it climbs back (50→100%). Same 6s
+       ease-in-out timing as .photoscan so the clip edge tracks the line. */
+    /* Login specimen 2D↔3D swap, synced to the scan line.
+       --scanpos is an animatable typed percentage that tracks the scan line's
+       vertical position (same 2%→96% path, same 6s ease-in-out). Each image is
+       masked by a soft gradient centred on --scanpos, so the two cross-fade
+       exactly where the line is: 3D fades IN above the line, 2D fades OUT above it.
+       A ~10% band (±5%) gives the soft fade rather than a hard edge. */
+    @property --scanpos { syntax: "<percentage>"; inherits: false; initial-value: 2%; }
+    @keyframes scanpos { 0% { --scanpos: 2%; } 50% { --scanpos: 96%; } 100% { --scanpos: 2%; } }
+    .biker-3d {
+      -webkit-mask-image: linear-gradient(to bottom, #000 calc(var(--scanpos) - 5%), transparent calc(var(--scanpos) + 5%));
+      mask-image: linear-gradient(to bottom, #000 calc(var(--scanpos) - 5%), transparent calc(var(--scanpos) + 5%));
+      animation: scanpos 6s ease-in-out infinite;
     }
-    header {
-      padding: 28px 24px 8px;
-      max-width: 1080px;
-      margin: 0 auto;
+    .biker-2d {
+      -webkit-mask-image: linear-gradient(to bottom, transparent calc(var(--scanpos) - 5%), #000 calc(var(--scanpos) + 5%));
+      mask-image: linear-gradient(to bottom, transparent calc(var(--scanpos) - 5%), #000 calc(var(--scanpos) + 5%));
+      animation: scanpos 6s ease-in-out infinite;
     }
-    header h1 { margin: 0; font-size: 22px; letter-spacing: 0.2px; }
-    header p { margin: 4px 0 0; color: var(--muted); font-size: 14px; }
-    main {
-      max-width: 1080px;
-      margin: 0 auto;
-      padding: 16px 24px 64px;
-      display: grid;
-      grid-template-columns: 380px 1fr;
-      gap: 20px;
-      align-items: start;
+
+    /* Hover / focus behaviours (replace the design prototype's style-hover / style-focus attrs).
+       !important so they win over the element's inline base styles. */
+    .h-primary { transition: background .15s, box-shadow .15s; }
+    .h-primary:hover { background: #7CFFF1 !important; box-shadow: 0 0 54px rgba(53,242,226,.75) !important; }
+    .h-ghost { transition: border-color .15s, box-shadow .15s, color .15s; }
+    .h-ghost:hover { border-color: #35F2E2 !important; color: #35F2E2 !important; box-shadow: 0 0 20px rgba(53,242,226,.3) !important; }
+    .h-nav { transition: color .15s; }
+    .h-nav:hover { color: #7CFFF1 !important; }
+    .h-card { transition: background .2s; }
+    .h-card:hover { background: #041a17 !important; }
+    .h-danger { transition: background .15s, box-shadow .15s; }
+    .h-danger:hover { background: #ff7a8a !important; }
+    .h-remove { transition: border-color .15s, color .15s; }
+    .h-remove:hover { border-color: #FF5468 !important; color: #FF5468 !important; }
+    .field { transition: border-color .15s, box-shadow .15s; }
+    .field:focus { border-color: #35F2E2 !important; box-shadow: 0 0 0 1px #35F2E2, 0 0 22px rgba(53,242,226,.25) !important; outline: none; }
+
+    /* Lenis smooth-scroll (recommended base styles). */
+    html.lenis, html.lenis body { height: auto; }
+    .lenis.lenis-smooth { scroll-behavior: auto !important; }
+    .lenis.lenis-smooth [data-lenis-prevent] { overscroll-behavior: contain; }
+    .lenis.lenis-stopped { overflow: hidden; }
+
+    /* SpotlightCard — a pointer-following cyan glow (react-bits style). The glow
+       sits above the card's own background but below content, so text stays crisp. */
+    [data-spot] { position: relative; isolation: isolate; }
+    [data-spot]::before {
+      content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+      opacity: var(--spot, 0); transition: opacity .35s ease;
+      background: radial-gradient(340px circle at var(--mx, 50%) var(--my, 50%), rgba(53,242,226,.16), transparent 60%);
     }
-    @media (max-width: 860px) { main { grid-template-columns: 1fr; } }
-    .panel {
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 18px;
+    [data-magnet] { will-change: transform; }
+
+    /* Motion reduction: honour the OS/browser preference. */
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; }
     }
-    .panel h2 { margin: 0 0 12px; font-size: 15px; font-weight: 600; }
-    label { display: block; font-size: 13px; color: var(--muted); margin: 12px 0 4px; }
-    input[type="number"], select {
-      width: 100%;
-      background: var(--panel-2);
-      color: var(--text);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 9px 10px;
-      font-size: 14px;
-    }
-    input[type="file"] { width: 100%; font-size: 13px; color: var(--muted); }
-    .dropzone {
-      border: 1px dashed var(--border);
-      border-radius: 10px;
-      padding: 16px;
-      text-align: center;
-      background: var(--panel-2);
-    }
-    .preview-img {
-      max-width: 100%; max-height: 220px; border-radius: 8px; margin-top: 12px; display: none;
-    }
-    details { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 12px; }
-    details summary { cursor: pointer; font-size: 13px; color: var(--muted); }
-    .row { display: flex; gap: 10px; }
-    .row > div { flex: 1; }
-    .checkbox { display: flex; align-items: center; gap: 8px; margin-top: 14px; }
-    .checkbox label { margin: 0; color: var(--text); font-size: 14px; }
-    button {
-      margin-top: 18px;
-      width: 100%;
-      background: linear-gradient(180deg, var(--accent) 0%, var(--accent-2) 100%);
-      color: white;
-      border: none;
-      border-radius: 10px;
-      padding: 12px;
-      font-size: 15px;
-      font-weight: 600;
-      cursor: pointer;
-    }
-    button:disabled { opacity: 0.5; cursor: not-allowed; }
-    button.secondary {
-      background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
-    }
-    .banner {
-      display: none;
-      margin: 0 0 14px; padding: 10px 12px; border-radius: 8px;
-      font-size: 13px; background: rgba(240,160,47,0.12);
-      border: 1px solid rgba(240,160,47,0.4); color: var(--warn);
-    }
-    .status-row { display: flex; align-items: center; gap: 12px; }
-    .spinner {
-      width: 20px; height: 20px; border-radius: 50%;
-      border: 3px solid var(--border); border-top-color: var(--accent);
-      animation: spin 0.9s linear infinite;
-    }
-    .spinner.hidden { display: none; }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    .status-text { font-size: 15px; font-weight: 500; }
-    .status-sub { font-size: 13px; color: var(--muted); }
-    .stages { margin-top: 14px; display: flex; flex-direction: column; gap: 6px; }
-    .stage { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
-    .stage .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--border); }
-    .stage.active .dot { background: var(--accent); }
-    .stage.done .dot { background: var(--ok); }
-    .stage.active { color: var(--text); }
-    model-viewer {
-      width: 100%; height: 420px; background: var(--panel-2);
-      border-radius: 10px; margin-top: 4px; --poster-color: transparent;
-    }
-    table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 13px; }
-    th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--border); }
-    th { color: var(--muted); font-weight: 500; }
-    td.val { text-align: right; font-variant-numeric: tabular-nums; }
-    .downloads { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
-    .downloads a {
-      font-size: 13px; text-decoration: none; color: var(--text);
-      background: var(--panel-2); border: 1px solid var(--border);
-      padding: 7px 11px; border-radius: 8px;
-    }
-    .downloads a:hover { border-color: var(--accent); }
-    .error-box {
-      background: rgba(255,107,107,0.08); border: 1px solid rgba(255,107,107,0.4);
-      border-radius: 10px; padding: 14px; margin-top: 4px;
-    }
-    .error-box .title { color: var(--err); font-weight: 600; margin-bottom: 6px; }
-    .error-box pre {
-      white-space: pre-wrap; word-break: break-word; font-size: 12.5px;
-      color: var(--text); margin: 8px 0 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    }
-    .hidden { display: none; }
-    .muted { color: var(--muted); font-size: 13px; }
   </style>
 </head>
 <body>
-  <header>
-    <h1>TRELLIS.2 &middot; Image to Printable 3D</h1>
-    <p>Upload a photo. Get back a watertight, print-ready 3D model. Runs locally on this Mac's GPU.</p>
-  </header>
-
-  <main>
-    <!-- Upload panel -->
-    <section class="panel" id="upload-panel">
-      <h2>Upload</h2>
-      <div id="queue-banner" class="banner"></div>
-      <form id="upload-form">
-        <div class="dropzone">
-          <input type="file" id="image-input" name="image" accept="image/*" required />
-          <img id="preview" class="preview-img" alt="preview" />
-        </div>
-
-        <details id="advanced">
-          <summary>Advanced options</summary>
-          <div class="row">
-            <div>
-              <label for="seed">Seed</label>
-              <input type="number" id="seed" name="seed" />
-            </div>
-            <div>
-              <label for="target_faces">Target faces</label>
-              <input type="number" id="target_faces" name="target_faces" min="1000" step="1000" />
-            </div>
-          </div>
-          <label for="pipeline_type">Pipeline</label>
-          <select id="pipeline_type" name="pipeline_type"></select>
-          <div class="checkbox">
-            <input type="checkbox" id="skip_printable" name="skip_printable" />
-            <label for="skip_printable">Skip print-prep step (geometry only)</label>
-          </div>
-        </details>
-
-        <button type="submit" id="submit-btn">Generate 3D model</button>
-      </form>
-      <p class="muted" id="model-note" style="margin-top:14px;"></p>
-    </section>
-
-    <!-- Right column: status / error / result -->
-    <div>
-      <!-- Status panel -->
-      <section class="panel" id="status-panel" style="display:none;">
-        <h2>Progress</h2>
-        <div class="status-row">
-          <div class="spinner" id="spinner"></div>
-          <div>
-            <div class="status-text" id="status-text">Queued...</div>
-            <div class="status-sub" id="status-sub"></div>
-          </div>
-        </div>
-        <div class="stages" id="stages"></div>
-      </section>
-
-      <!-- Error panel -->
-      <section class="panel" id="error-panel" style="display:none;">
-        <h2>Something went wrong</h2>
-        <div class="error-box">
-          <div class="title" id="error-message"></div>
-          <pre id="error-hint"></pre>
-        </div>
-        <button class="secondary" id="retry-btn">Retry with same settings</button>
-      </section>
-
-      <!-- Result panel -->
-      <section class="panel" id="result-panel" style="display:none;">
-        <h2>Result</h2>
-        <model-viewer id="viewer" camera-controls auto-rotate shadow-intensity="1"
-                      exposure="1" ar interaction-prompt="none"></model-viewer>
-        <div class="downloads" id="downloads"></div>
-
-        <h2 style="margin-top:20px;">Mesh</h2>
-        <table id="mesh-table"></table>
-
-        <div id="diag-wrap">
-          <h2 style="margin-top:20px;">Print diagnostics</h2>
-          <table id="diag-table"></table>
-        </div>
-
-        <button class="secondary" id="new-btn" style="margin-top:20px;">Start another</button>
-      </section>
-    </div>
-  </main>
-
+  <div id="app" style="min-height:100vh;background:#010807"></div>
   <script src="/static/app.js"></script>
 </body>
 </html>

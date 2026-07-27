@@ -52,6 +52,7 @@ class Job:
     params: dict
     input_image_path: str
     output_dir: str
+    operator: str = "anonymous"
     result: Optional[dict] = None
     diagnostics: Optional[dict] = None
     fidelity: Optional[dict] = None
@@ -101,7 +102,9 @@ class JobStore:
         self._jobs: dict[str, Job] = {}
         self._jobs_dir = Path(jobs_dir) if jobs_dir is not None else config.JOBS_DIR
 
-    def create(self, params: dict, image_bytes: bytes, filename: str) -> Job:
+    def create(
+        self, params: dict, image_bytes: bytes, filename: str, operator: str = "anonymous"
+    ) -> Job:
         job_id = uuid.uuid4().hex
         job_dir = self._jobs_dir / job_id
         input_dir = job_dir / "input"
@@ -122,6 +125,7 @@ class JobStore:
             params=dict(params),
             input_image_path=str(input_path),
             output_dir=str(output_dir),
+            operator=operator,
         )
         with self._lock:
             self._jobs[job_id] = job

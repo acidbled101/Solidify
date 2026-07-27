@@ -26,14 +26,10 @@ echo "  TRELLIS_DEVICE       = ${TRELLIS_DEVICE:-mps}"
 echo "  TRELLIS_PIPELINE_TYPE= ${TRELLIS_PIPELINE_TYPE:-1024_cascade}"
 echo "  TRELLIS_NO_TEXTURE   = ${TRELLIS_NO_TEXTURE:-1}"
 echo "  Listening on         = http://${HOST}:${PORT}"
-if [ -n "${TRELLIS_AUTH_PASSWORD:-}" ]; then
-  echo "  Auth                 = ON  (user: ${TRELLIS_AUTH_USER:-admin})"
-else
-  echo "  Auth                 = OFF -- fine on a trusted LAN. Before sharing this"
-  echo "                          past your own network (e.g. via a tunnel), set"
-  echo "                          TRELLIS_AUTH_PASSWORD (and optionally"
-  echo "                          TRELLIS_AUTH_USER) so the server requires login."
-fi
+echo "  Database             = ${TRELLIS_DB_PATH:-$(pwd)/trellis.db}"
+echo "  Auth                 = managed by the operators table in the DB."
+echo "                          0 operators -> OPEN (bootstrap); add one with"
+echo "                          'python -m server.admin add <name>' to require login."
 echo "============================================================"
 
 exec uvicorn server.main:app --host "${HOST}" --port "${PORT}"
