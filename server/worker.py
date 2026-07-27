@@ -117,6 +117,7 @@ def _run_job(store: JobStore, job_id: str) -> None:
             target_faces=int(params.get("target_faces", config.DEFAULT_TARGET_FACES)),
             texture_size=int(params.get("texture_size", config.DEFAULT_TEXTURE_SIZE)),
             no_texture=config.NO_TEXTURE,
+            skip_texture=bool(params.get("skip_texture", config.SKIP_TEXTURE_BY_DEFAULT)),
             out_glb_path=glb_path,
             out_obj_path=obj_path,
         )

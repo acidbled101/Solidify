@@ -232,6 +232,7 @@ async def create_job(
     texture_size: str = Form(None),
     target_faces: str = Form(None),
     skip_printable: str = Form(None),
+    skip_texture: str = Form(None),
 ):
     if worker.queue_depth() >= config.MAX_QUEUE_DEPTH:
         return _error(429, f"Queue is full ({config.MAX_QUEUE_DEPTH} jobs waiting). Try again shortly.")
@@ -271,6 +272,9 @@ async def create_job(
     skip_printable_v = (
         _as_bool(skip_printable) if skip_printable is not None else config.SKIP_PRINTABLE_BY_DEFAULT
     )
+    skip_texture_v = (
+        _as_bool(skip_texture) if skip_texture is not None else config.SKIP_TEXTURE_BY_DEFAULT
+    )
 
     params = {
         "seed": seed_v,
@@ -278,6 +282,7 @@ async def create_job(
         "texture_size": texture_size_v,
         "target_faces": target_faces_v,
         "skip_printable": skip_printable_v,
+        "skip_texture": skip_texture_v,
     }
 
     operator = getattr(request.state, "user", "anonymous")
@@ -343,6 +348,7 @@ async def get_config():
         "default_seed": config.DEFAULT_SEED,
         "default_target_faces": config.DEFAULT_TARGET_FACES,
         "skip_printable_by_default": config.SKIP_PRINTABLE_BY_DEFAULT,
+        "skip_texture_by_default": config.SKIP_TEXTURE_BY_DEFAULT,
         "no_texture": config.NO_TEXTURE,
         "max_upload_mb": config.MAX_UPLOAD_MB,
         "model_id": config.MODEL_ID,

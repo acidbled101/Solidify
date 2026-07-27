@@ -25,7 +25,7 @@
     authName: "", authKey: "", authError: false,
     phase: "idle",                // idle | uploaded | busy | warming | running | success | error
     photoSrc: null, photoName: "", photoSize: "", photoFile: null,
-    seed: "", detail: 1000000, quality: "standard", skipPrep: false, advOpen: false,
+    seed: "", detail: 1000000, quality: "standard", skipPrep: false, skipTexture: false, advOpen: false,
     prog: 0, stageIdx: -1, log: [], queuePos: 0, busyReason: "", errMsg: "", errHint: "", dragOver: false,
     jobId: "",
     infoRows: null, diagRows: null, previewSrc: null, previewPath: null, libDraft: null,
@@ -148,6 +148,7 @@
         var df = parseInt(serverConfig.default_target_faces, 10);
         if (!isNaN(df)) state.detail = Math.max(200000, Math.min(2000000, df));
         if (serverConfig.skip_printable_by_default) state.skipPrep = true;
+        if (serverConfig.skip_texture_by_default) state.skipTexture = true;
         if (serverConfig.max_upload_mb) state.maxUploadMB = serverConfig.max_upload_mb;
       }
       refreshHealth();
@@ -622,6 +623,7 @@
             '<option value="high"' + (state.quality === "high" ? " selected" : "") + '>High — slowest, finest</option>' +
           '</select></label>' +
         '<label style="display:flex;align-items:center;gap:12px;cursor:pointer"><input type="checkbox" data-model="skipPrep"' + (state.skipPrep ? " checked" : "") + ' style="accent-color:#35F2E2;width:16px;height:16px" /><span style="font-family:\'IBM Plex Mono\',monospace;font-size:11px;letter-spacing:.12em;color:#a8ded7">SKIP PRINT-PREP <span style="color:#3f7a73">(raw geometry only — not watertight)</span></span></label>' +
+        '<label style="display:flex;align-items:center;gap:12px;cursor:pointer"><input type="checkbox" data-model="skipTexture"' + (state.skipTexture ? " checked" : "") + ' style="accent-color:#35F2E2;width:16px;height:16px" /><span style="font-family:\'IBM Plex Mono\',monospace;font-size:11px;letter-spacing:.12em;color:#a8ded7">⚡ SKIP TEXTURE <span style="color:#3f7a73">(faster — geometry only, same mesh)</span></span></label>' +
       '</div>'
     ) : "";
     return '<div style="border:1px solid rgba(53,242,226,.2)">' +
@@ -835,6 +837,7 @@
     fd.append("target_faces", String(state.detail));
     fd.append("pipeline_type", qualityToPipeline(state.quality));
     fd.append("skip_printable", state.skipPrep ? "1" : "0");
+    fd.append("skip_texture", state.skipTexture ? "1" : "0");
     try {
       var r = await api("/api/jobs", { method: "POST", body: fd });
       if (r.status === 429) {
@@ -1174,6 +1177,8 @@
       var lbl = appEl.querySelector("#detail-label"); if (lbl) lbl.textContent = num(state.detail);
     } else if (key === "skipPrep") {
       state.skipPrep = el.checked;
+    } else if (key === "skipTexture") {
+      state.skipTexture = el.checked;
     } else {
       state[key] = el.value; // authName / authKey / seed / quality — no re-render (preserve focus/caret)
     }

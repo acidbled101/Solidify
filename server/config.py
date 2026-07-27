@@ -31,6 +31,12 @@ DEFAULT_TEXTURE_SIZE = int(os.environ.get("TRELLIS_TEXTURE_SIZE", "2048"))
 # product decision is to keep it on.
 NO_TEXTURE = _as_bool(os.environ.get("TRELLIS_NO_TEXTURE", "1"))
 
+# Skip texture-SLat *inference* (not just the export): a full ~1.3B-param
+# diffusion phase + texture decode that are pure waste whenever NO_TEXTURE is on.
+# Geometry is identical (it comes from the shape latent). Off by default so it
+# can be A/B-tested per job before becoming the default; flip to "1" to confirm.
+SKIP_TEXTURE_BY_DEFAULT = _as_bool(os.environ.get("TRELLIS_SKIP_TEXTURE", "0"))
+
 # --- make_printable defaults -----------------------------------------------
 PRINTABLE_TARGET_FACES = int(os.environ.get("TRELLIS_PRINTABLE_TARGET_FACES", "1000000"))
 PRINTABLE_OVERHANG_ANGLE = float(os.environ.get("TRELLIS_OVERHANG_ANGLE", "45.0"))

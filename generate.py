@@ -45,6 +45,12 @@ def main():
         "--model-id", default="microsoft/TRELLIS.2-4B",
         help="HuggingFace model id to load (default: microsoft/TRELLIS.2-4B)",
     )
+    parser.add_argument(
+        "--skip-texture", action="store_true",
+        help="Skip texture-SLat inference entirely (geometry only). Much faster; "
+             "implies --no-texture. Geometry is identical to a full run at the "
+             "same seed.",
+    )
     args = parser.parse_args()
 
     if not os.path.exists(args.image):
@@ -79,6 +85,7 @@ def main():
             target_faces=args.target_faces,
             texture_size=args.texture_size,
             no_texture=args.no_texture,
+            skip_texture=args.skip_texture,
             out_glb_path=glb_path,
             out_obj_path=obj_path,
         )
