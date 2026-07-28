@@ -76,9 +76,28 @@ class GenerationResult:
     used_metal_bake: bool
 
 
+def _free_memory():
+    """Compact the MPS allocator pool + run GC. The 1024 shape decode peaks right
+    at the 32 GB memory ceiling on this Mac (it spills into swap), so reclaiming
+    what we can just before it matters."""
+    import gc
+
+    gc.collect()
+    try:
+        torch.mps.empty_cache()
+    except Exception:
+        pass
+
+
+@torch.no_grad()
 def _run_geometry_only(pipeline, image, *, seed, pipeline_type, sampler_params):
     """Shape-only inference: mirror Trellis2ImageTo3DPipeline.run() but skip the
     texture-SLat sampling and texture decode.
+
+    NOTE: the @torch.no_grad() decorator is load-bearing -- the vendored run()
+    has it, and without it every tensor here carries an autograd graph, which
+    both breaks the downstream `.cpu().numpy()` (tensor requires grad) and roughly
+    doubles decoder memory (a real 1024 OOM was traced to exactly this).
 
     The mesh is produced entirely from the shape latent (`decode_shape_slat`);
     the texture latent only adds surface colour, which we discard under
@@ -127,9 +146,18 @@ def _run_geometry_only(pipeline, image, *, seed, pipeline_type, sampler_params):
             512, 1536, coords, sampler_params,
         )
 
+    # The 1024 shape decode is the memory peak on a 32 GB Mac (it spills into
+    # swap and sits right at the MPS watermark -- a real OOM was seen here, 74 MiB
+    # short of the limit). Drop the conditioning + coords we no longer need and
+    # compact the pool before decoding, giving it headroom the monolithic run()
+    # never reclaims.
+    del cond_512, cond_1024, coords
+    _free_memory()
+
     meshes, _subs = pipeline.decode_shape_slat(shape_slat, res)
     mesh = meshes[0]
     mesh.fill_holes()  # same hole-fill run()'s decode_latent applies
+    _free_memory()
     return mesh
 
 
