@@ -33,9 +33,10 @@ NO_TEXTURE = _as_bool(os.environ.get("TRELLIS_NO_TEXTURE", "1"))
 
 # Skip texture-SLat *inference* (not just the export): a full ~1.3B-param
 # diffusion phase + texture decode that are pure waste whenever NO_TEXTURE is on.
-# Geometry is identical (it comes from the shape latent). Off by default so it
-# can be A/B-tested per job before becoming the default; flip to "1" to confirm.
-SKIP_TEXTURE_BY_DEFAULT = _as_bool(os.environ.get("TRELLIS_SKIP_TEXTURE", "0"))
+# Now ON by default -- A/B verified the output mesh is byte-identical to a full
+# run while cutting generation ~35% at 1024 (1032s -> 667s on a real photo) and
+# lowering peak memory. Set TRELLIS_SKIP_TEXTURE=0 to force the old full path.
+SKIP_TEXTURE_BY_DEFAULT = _as_bool(os.environ.get("TRELLIS_SKIP_TEXTURE", "1"))
 
 # --- make_printable defaults -----------------------------------------------
 PRINTABLE_TARGET_FACES = int(os.environ.get("TRELLIS_PRINTABLE_TARGET_FACES", "1000000"))
