@@ -386,7 +386,7 @@ def to_manifold(vertices, faces, opts, notes):
         man, f = _ensure_positive(man, v, f, notes)
         return man, v, f, False
 
-    tm = trimesh.Trimesh(vertices=v, faces=f, process=False)
+    tm = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
     pitch = opts.voxel_pitch or (np.linalg.norm(tm.extents) / 1024.0)
 
     if opts.repair_backend == "meshlib":
@@ -395,10 +395,18 @@ def to_manifold(vertices, faces, opts, notes):
         # marching cubes, so it lands far closer to the original surface for a
         # fraction of the triangles. Orientation was already repaired above,
         # which is what makes the winding-number sign detection trustworthy.
+        #
+        # Deliberately rebuilt from the ORIGINAL arrays, not the ladder's
+        # repaired ones: the ladder closes holes by stitching triangles across
+        # them, and the winding number reads the far side of those patches as
+        # inside-out -- the same crater artifact that closeHolesInHoleWindingNumber
+        # causes. The SDF handles open holes on its own. Measured on the Benchy:
+        # feeding it the repaired mesh put 2.2% of the surface >2 voxels
+        # off-target; feeding it the original puts 0.0% there.
         msg = "repairs did not produce a manifold; rebuilding through MeshLib's SDF"
         print(f"  {msg}...")
         notes.append(msg)
-        v, f = meshlib_repair.rebuild(v, f, pitch, notes)
+        v, f = meshlib_repair.rebuild(vertices, faces, pitch, notes)
     else:
         msg = "repairs did not produce a manifold; falling back to v1 voxel remesh"
         print(f"  {msg}...")

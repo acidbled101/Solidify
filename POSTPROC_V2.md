@@ -134,6 +134,40 @@ contradictory states, so the ladder still ends at a remesh — but now it is a
 The topology-preserving path (no remesh at all) is verified working on clean input
 and will pay off if upstream mesh extraction ever emits coherent winding.
 
+### Crater/scab artifacts, and the two bugs behind them
+
+First real-world v3 output (a 3DBenchy) came back with crater-like scabs across
+otherwise smooth hull panels. Measured against the raw generated mesh, **7.2 % of
+the surface bulged more than 2 voxels outside it and 6.7 % dented more than 2
+voxels into it, worst case 28 voxels** — far too big to be resampling error. Two
+independent causes, both since fixed:
+
+1. **Per-face orientation voting left speckle.** `findDisorientedFaces` decides
+   each face independently by ray parity, which still left 3.6 % of edges
+   contradictory, scattered in patches. The winding number then reads ±1 off
+   across each patch and the isosurface jumps to a different sheet — on a Benchy,
+   from the hull to the cabin wall, tens of voxels away. Fix: propagate winding
+   over face adjacency first (noise-free, but only makes each patch
+   self-consistent), then use ray parity solely to decide each connected patch's
+   global sign by majority vote. 3.610 % → 0.043 % contradictory edges.
+2. **Virtual hole closing inverted the field.** `closeHolesInHoleWindingNumber`
+   (MeshLib's default, and separately what our own PyMeshLab repair rung did by
+   stitching triangles over holes) lays a phantom cap across every hole; the
+   field on the far side of that cap comes out inside-out. The generalized
+   winding number degrades gracefully across genuine holes and does not need the
+   caps. Fix: turn the flag off, and feed the SDF the *original* cleaned arrays
+   rather than the repair ladder's hole-closed ones.
+
+| | bulge >2 vox | dent >2 vox | p99 error | rebuild |
+|---|---|---|---|---|
+| Before (shipped briefly) | 7.18 % | 6.65 % | 10.0 vox | 30.4 s |
+| Patch vote only | 3.93 % | 2.96 % | 15.1 vox | 30.3 s |
+| **Both fixes (current)** | **0.23 %** | **0.28 %** | **1.2 vox** | **6.2 s** |
+
+The flower mesh was unaffected either way (0.00 % / 0.01 %, p99 0.4 vox) — organic
+surfaces hide the artifact, which is why the first round of testing missed it.
+**Test print-prep changes on a mechanical shape with large flat/smooth panels.**
+
 ### Which MeshLib operations did *not* work
 
 Recorded so nobody re-runs these:
