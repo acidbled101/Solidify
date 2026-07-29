@@ -1,19 +1,23 @@
-# Print-prep pipeline v2 (PyMeshLab + Manifold3D)
+# Print-prep pipelines v2 / v3 (PyMeshLab + Manifold3D + MeshLib)
 
-Experimental alternative to `trellis_core/printable.py`, living side by side with it
-so the two can be run on the same mesh and compared.
+Experimental alternatives to `trellis_core/printable.py`, living side by side with it
+so all three can be run on the same mesh and compared.
 
-| | v1 (`printable.py`) | v2 (`printable_v2.py`) |
-|---|---|---|
-| Clean | trimesh `merge_vertices` + degenerate-face drop | PyMeshLab: null faces, duplicate faces/vertices, unreferenced points |
-| Denoise | none | PyMeshLab Taubin (volume-preserving), sharp edges locked |
-| Solidify | voxelize + orthographic flood fill (always) | Manifold3D exact booleans; voxel path only as a last resort |
-| Guarantee | watertight *before* decimation | valid 2-manifold *after* every step, including export |
+| | v1 (`printable.py`) | v2 (`printable_v2.py`) | v3 (`printable_v2.py`, `repair_backend="meshlib"`) |
+|---|---|---|---|
+| Clean | trimesh `merge_vertices` + degenerate-face drop | PyMeshLab: null faces, duplicate faces/vertices, unreferenced points | same as v2 |
+| Orientation | none | none (PyMeshLab/trimesh reorienters fail, see below) | **MeshLib ray-parity repair** |
+| Denoise | none | PyMeshLab Taubin (volume-preserving), sharp edges locked | same as v2 |
+| Solidify | voxelize + orthographic flood fill (always) | Manifold3D exact booleans; trimesh voxel remesh as last resort | Manifold3D + **MeshLib SDF rebuild** as last resort |
+| Guarantee | watertight *before* decimation | valid 2-manifold *after* every step, including export | same as v2 |
+
+**v3 is the one to use.** On real TRELLIS meshes it is ~2× faster than both, 4–7×
+smaller, and 20–25× closer to the original surface. Numbers below.
 
 ## Install
 
 ```bash
-pip install -e ".[postproc-v2]"     # or: pip install pymeshlab manifold3d
+pip install -e ".[postproc-v2]"     # pymeshlab + manifold3d + meshlib
 ```
 
 ## Run the comparison
@@ -21,13 +25,13 @@ pip install -e ".[postproc-v2]"     # or: pip install pymeshlab manifold3d
 ```bash
 python compare_printable.py jobs/<id>/output/model.glb
 python compare_printable.py in.glb --quiet --json metrics.json
-python compare_printable.py in.glb --only v2 --taubin-steps 20 --crease-angle 45
+python compare_printable.py in.glb --only v3 --taubin-steps 20 --crease-angle 45
 ```
 
-Both pipelines write `<outdir>/v1.{glb,stl}` and `<outdir>/v2.{glb,stl}`, then are
-measured with the *same* ruler: fidelity is recomputed by the harness against one
-shared reference (the input's largest component, pre-repair), and printability comes
-from the same `printable.diagnostics()` for both.
+All three write `<outdir>/v{1,2,3}.{glb,stl}`, then are measured with the *same*
+ruler: fidelity is recomputed by the harness against one shared reference (the
+input's largest component, pre-repair), and printability comes from the same
+`printable.diagnostics()` for each.
 
 ## The pipeline
 
@@ -75,41 +79,72 @@ Two real job meshes, identical settings, same machine. Mesh A =
 `jobs/2c20e636…/output/model.glb` (195K faces after component filtering), mesh B =
 `jobs/1467d882…/output/model.glb` (986K faces).
 
-| Metric | A: v1 | A: v2 | B: v1 | B: v2 |
-|---|---|---|---|---|
-| Wall time | 26.6 s | 27.9 s | 72.6 s | 79.0 s |
-| Faces | 1,000,000 | 999,984 | 1,000,000 | 999,546 |
-| **Watertight (GLB)** | **no** | **yes** | **no** | **yes** |
-| **Watertight (STL, as a slicer loads it)** | **no** | **yes** | **no** | **yes** |
-| Disconnected bodies | 11 | 1 | 346 | 1 |
-| Chamfer vs original | 0.106 % | 0.072 % (−32 %) | 0.107 % | 0.060 % (−44 %) |
-| Hausdorff vs original | 3.98 % | 1.77 % (−56 %) | 9.88 % | 0.86 % (−91 %) |
-| Overhang area | 13.3 % | 19.6 % | 20.0 % | 21.4 % |
+| Metric | A: v1 | A: v2 | A: v3 | B: v1 | B: v2 | B: v3 |
+|---|---|---|---|---|---|---|
+| Wall time | 27.4 s | 28.1 s | **11.8 s** | 73.2 s | 76.3 s | **32.3 s** |
+| Faces | 1,000,000 | 999,984 | **140,480** | 1,000,000 | 999,546 | **251,842** |
+| **Watertight (GLB)** | **no** | yes | yes | **no** | yes | yes |
+| **Watertight (STL, as a slicer loads it)** | **no** | yes | yes | **no** | yes | yes |
+| Disconnected bodies | 11 | 1 | 3 | 346 | 1 | 1 |
+| Chamfer vs original | 0.106 % | 0.072 % | **0.006 %** | 0.111 % | 0.060 % | **0.005 %** |
+| Hausdorff vs original | 3.92 % | 1.76 % | **0.47 %** | 10.01 % | 0.78 % | **0.45 %** |
+| STL size | 48.8 MB | 48.8 MB | **6.9 MB** | 48.8 MB | 48.8 MB | **12.3 MB** |
+| Overhang area | 13.3 % | 19.6 % | 20.3 % | 20.0 % | 21.4 % | 21.4 % |
 
-Same file size and 1–9 % more time, but v2 delivers a single watertight body where v1
-delivers 11 and 346 non-watertight ones, at a fraction of the worst-case deviation.
-The gap widens with mesh size: v1's post-voxel decimation is what shatters the model,
-and it never re-checks the result.
+v2 buys watertightness at v1's runtime and file size. v3 additionally halves the
+runtime, cuts the file 4–7×, and lands 18–25× closer to the original surface —
+because a correctly-oriented SDF rebuild needs far fewer triangles to describe the
+same shape than a binary voxel grid does.
+
+v1's Hausdorff of 10 % on mesh B is not a rounding artifact: its post-voxel
+decimation shattered that model into 346 bodies and it never re-checked the result.
 
 **On the overhang number**: v2 is not more overhung, it is more honest. With
 `--taubin-steps 0` v2 reports 13.7 %, right next to v1's 13.3 %. The voxel staircase
 has axis-aligned normals that dodge the overhang test; smoothing restores the true
 surface slope, and the metric follows.
 
-## Known finding: TRELLIS meshes need the voxel rung
+## Root cause: TRELLIS emits scrambled face winding
 
 Every one of the six real job meshes surveyed failed to become a manifold through
-rungs 1–3. They come out of the repair chain closed and edge-manifold (0 open edges,
-0 non-manifold edges) but with an odd Euler characteristic and winding that neither
-`meshing_re_orient_faces_coherently` nor `trimesh.repair.fix_winding` can make
-coherent — self-touching sheets from the generator's mesh extraction.
+rungs 1–3, and the reason turned out to be measurable and specific: **22.6 % of the
+interior edges are traversed in the same direction by both adjacent faces**
+(66,095 of 291,787 on mesh A; 550,656 faces needed flipping on mesh B). The mesh is
+essentially closed — 411 open edges, 89 non-manifold edges — but its orientation is
+noise.
 
-So on today's TRELLIS output, v2's advantage does **not** come from preserving
-original topology (rung 4 fires, same as v1). It comes from validating the result at
-every step: post-remesh denoise, post-decimation re-repair, cavity/fragment removal
-via exact booleans, and an STL that survives its own round-trip. The topology-
-preserving path is verified working on clean input (synthetic and hand-punctured
-meshes) and will pay off if upstream mesh extraction improves.
+That single defect explains every symptom:
+
+- Manifold3D rejects it outright (it requires an *oriented* 2-manifold).
+- MeshLib's importer splits a vertex at every contradiction: 97K verts → 182K, and
+  24,244 holes appear out of nowhere.
+- Winding-number/SDF methods read the winding, so they return confident garbage —
+  MeshLib's `rebuildMesh` gave a volume 2.4× off across 5,921 disconnected bodies.
+- `meshing_re_orient_faces_coherently` and `trimesh.repair.fix_winding` both fail,
+  because they propagate orientation across the very adjacency that is broken.
+
+MeshLib's `findDisorientedFaces` decides per face by **ray parity** — geometry, not
+connectivity — and clears 99.3 % of it in ~0.1 s. That is the whole unlock: run it
+first and every downstream tool starts behaving. A residual ~460 edges (0.16 %) sit
+in genuinely ambiguous self-touching sheets and oscillate between two equally
+contradictory states, so the ladder still ends at a remesh — but now it is a
+*correctly signed* SDF rebuild instead of a blind voxel fill, which is where v3's
+20× fidelity gain comes from.
+
+The topology-preserving path (no remesh at all) is verified working on clean input
+and will pay off if upstream mesh extraction ever emits coherent winding.
+
+### Which MeshLib operations did *not* work
+
+Recorded so nobody re-runs these:
+
+| Attempt | Result |
+|---|---|
+| `fillHoles` on the imported mesh | Valid manifold, but the vertex-split had already shattered it into 8,900 shells; largest held 1/6 of the volume |
+| Boolean-union those shells | Watertight, still only 18 % of the true volume |
+| `offsetMesh` unsigned ±1–2 voxels | Watertight and manifold, but unsigned distance has no inside: yields a thin skin (volume 0.000049 vs 0.0088) |
+| `rebuildMesh` before orientation repair | 5,921 bodies, volume 2.4× off |
+| `rebuildMesh` **after** orientation repair | ✅ what v3 ships |
 
 ## Options beyond v1's
 
@@ -118,12 +153,22 @@ meshes) and will pay off if upstream mesh extraction improves.
 | `--taubin-steps` | 10 | Denoise passes; 0 disables |
 | `--taubin-lambda` / `--taubin-mu` | 0.5 / −0.53 | Tune both together or volume drifts |
 | `--crease-angle` | 60° | Lock sharper edges out of smoothing; 0 smooths everything |
+| `--min-fragment-ratio` | 0.005 | Drop shells below this fraction of the main body's **bounding-box diagonal** |
 | `--hollow` | 0 (off) | Wall thickness via Minkowski erosion; cost scales with face count |
-| `--multi-object` | off | v2 boolean-**unions** the objects into one solid (v1 concatenates shells) |
+| `--multi-object` | off | v2/v3 boolean-**union** the objects into one solid (v1 concatenates shells) |
+
+### Why fragments are judged by extent, not volume
+
+An SDF rebuild can pinch a thin neck and turn a real limb into its own body. Those
+whiskers have almost no volume but real spatial reach, so a volume threshold deletes
+model geometry while looking harmless. Measured on mesh A, dropping shells under 1 %
+of *volume* pushed Hausdorff from 0.40 % to 3.97 %; the same 1 % threshold on
+*bounding-box diagonal* kept them and cost nothing. This matches how v1's
+`significant_components()` already filters input components.
 
 ## Status
 
 Not wired into `server/worker.py` or `make_printable.py` — `run_make_printable_v2()`
 takes the same arguments and returns the same `PrintableResult` shape as
-`run_make_printable()`, so switching is a one-line import change when the comparison
-justifies it.
+`run_make_printable()`, so switching is a one-line import change plus
+`repair_backend="meshlib"`.

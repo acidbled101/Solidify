@@ -33,6 +33,7 @@ dependencies = [
 postproc-v2 = [
     "pymeshlab",
     "manifold3d",
+    "meshlib",
 ]
 
 [project.scripts]

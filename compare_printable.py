@@ -1,20 +1,22 @@
 """
-Run both print-prep pipelines on the same .glb and report a side-by-side diff.
+Run every print-prep pipeline on the same .glb and report a side-by-side diff.
 
-  v1 = trellis_core/printable.py      (trimesh repair + voxel flood-fill)
-  v2 = trellis_core/printable_v2.py   (PyMeshLab clean/Taubin + Manifold3D)
+  v1 = trellis_core/printable.py    (trimesh repair + voxel flood-fill)
+  v2 = trellis_core/printable_v2.py (PyMeshLab clean/Taubin + Manifold3D)
+  v3 = the same v2 stages with repair_backend="meshlib" (MeshLib ray-parity
+       orientation repair + MeshLib SDF rebuild)
 
-Both are measured with the same ruler: fidelity is recomputed here against one
+All are measured with the same ruler: fidelity is recomputed here against one
 shared reference mesh (the input's largest component, pre-repair), and the
-printability diagnostics come from the same printable.diagnostics() for both.
+printability diagnostics come from the same printable.diagnostics() for each.
 
 Usage:
     python compare_printable.py test/output_3d.glb
     python compare_printable.py in.glb --outdir /tmp/cmp --quiet
-    python compare_printable.py in.glb --only v2 --taubin-steps 20
+    python compare_printable.py in.glb --only v3 --taubin-steps 20
 
-Outputs land in <outdir>/v1.{glb,stl} and <outdir>/v2.{glb,stl} so the two can
-be opened side by side in a slicer.
+Outputs land in <outdir>/v{1,2,3}.{glb,stl} so they can be opened side by side
+in a slicer.
 """
 
 import argparse
@@ -129,35 +131,49 @@ def _fmt(value, spec):
     return spec.format(value)
 
 
-def print_table(m1, m2):
+VARIANTS = {
+    "v1": "v1 voxel",
+    "v2": "v2 pymeshlab",
+    "v3": "v3 meshlib",
+}
+
+
+def print_table(metrics, baseline="v1"):
+    """Side-by-side table; deltas are measured against `baseline`."""
+    cols = [k for k in VARIANTS if metrics.get(k) is not None]
     label_w = max(len(r[1]) for r in ROWS) + 2
-    col_w = 16
+    col_w = 15
     print(f"\n{'=' * 70}")
     print("COMPARISON")
     print("=" * 70)
-    print(f"{'Metric':<{label_w}}{'v1 (voxel)':>{col_w}}{'v2 (manifold)':>{col_w}}{'  delta':>{col_w}}")
-    print("-" * (label_w + col_w * 3))
+    header = f"{'Metric':<{label_w}}" + "".join(f"{VARIANTS[k]:>{col_w}}" for k in cols)
+    print(header)
+    print("-" * len(header))
 
     for key, label, spec, lower_better in ROWS:
-        a = m1.get(key) if m1 else None
-        b = m2.get(key) if m2 else None
-        delta = ""
-        if (isinstance(a, (int, float)) and isinstance(b, (int, float))
-                and not isinstance(a, bool) and not isinstance(b, bool)):
-            diff = b - a
-            pct = f" ({100.0 * diff / a:+.0f}%)" if a else ""
-            arrow = ""
-            if lower_better is not None and diff != 0:
-                arrow = " better" if (diff < 0) == lower_better else " worse"
-            delta = f"{diff:+,.3f}{pct}{arrow}".rstrip()
-        print(f"{label:<{label_w}}{_fmt(a, spec):>{col_w}}{_fmt(b, spec):>{col_w}}{delta:>{col_w}}")
+        row = f"{label:<{label_w}}"
+        base = metrics[baseline].get(key) if metrics.get(baseline) else None
+        for k in cols:
+            value = metrics[k].get(key)
+            cell = _fmt(value, spec)
+            # Annotate every non-baseline column with its ratio to the baseline.
+            if (k != baseline and lower_better is not None
+                    and isinstance(value, (int, float)) and not isinstance(value, bool)
+                    and isinstance(base, (int, float)) and not isinstance(base, bool)
+                    and base and value):
+                factor = base / value if lower_better else value / base
+                if factor >= 1.5:
+                    cell += f" {factor:.0f}x"
+            row += f"{cell:>{col_w}}"
+        print(row)
 
-    if m2 and m2.get("stages"):
-        print("\nv2 stage breakdown (s): " +
-              ", ".join(f"{k}={v:.1f}" for k, v in m2["stages"].items()))
-    for tag, m in (("v1", m1), ("v2", m2)):
-        for note in (m or {}).get("notes", []):
-            print(f"  [{tag} note] {note}")
+    for k in cols:
+        if metrics[k].get("stages"):
+            print(f"\n{VARIANTS[k]} stage breakdown (s): " +
+                  ", ".join(f"{n}={s:.1f}" for n, s in metrics[k]["stages"].items()))
+    for k in cols:
+        for note in metrics[k].get("notes", []):
+            print(f"  [{k} note] {note}")
 
 
 def main():
@@ -165,7 +181,8 @@ def main():
     p.add_argument("input", help="Path to input .glb")
     p.add_argument("--outdir", default=None,
                    help="Output directory (default: model_output/compare_<stem>_<timestamp>)")
-    p.add_argument("--only", choices=["v1", "v2", "both"], default="both")
+    p.add_argument("--only", choices=["v1", "v2", "v3", "all", "both"], default="all",
+                   help="Which pipelines to run ('both' = v1+v2, kept for compatibility)")
     p.add_argument("--quiet", action="store_true", help="Suppress each pipeline's own logs")
     p.add_argument("--json", dest="json_path", default=None, help="Also write metrics to this JSON file")
 
@@ -183,6 +200,8 @@ def main():
     p.add_argument("--taubin-mu", type=float, default=-0.53)
     p.add_argument("--crease-angle", type=float, default=60.0,
                    help="Lock vertices on edges sharper than this out of smoothing (0 = smooth all)")
+    p.add_argument("--min-fragment-ratio", type=float, default=0.005,
+                   help="Drop shells whose bbox diagonal is below this fraction of the largest")
     p.add_argument("--hollow", type=float, default=0.0,
                    help="Hollow to this wall thickness (model units, v2 only; slow)")
     args = p.parse_args()
@@ -214,9 +233,16 @@ def main():
         min_object_ratio=args.min_object_ratio,
     )
 
+    v2_kwargs = dict(
+        taubin_steps=args.taubin_steps, taubin_lambda=args.taubin_lambda,
+        taubin_mu=args.taubin_mu, crease_angle=args.crease_angle,
+        hollow_thickness=args.hollow, min_fragment_ratio=args.min_fragment_ratio, **common,
+    )
+    wanted = {"all": ["v1", "v2", "v3"], "both": ["v1", "v2"]}.get(args.only, [args.only])
+
     results = {}
     logs = {}
-    if args.only in ("v1", "both"):
+    if "v1" in wanted:
         r, err, log, _s = _run("v1 (trimesh + voxel fill)", lambda: printable.run_make_printable(
             args.input, output_prefix=os.path.join(outdir, "v1"), **common), args.quiet)
         results["v1"], logs["v1"] = r, log
@@ -225,21 +251,28 @@ def main():
             if args.quiet:
                 print(log)
 
-    if args.only in ("v2", "both"):
+    if "v2" in wanted:
         r, err, log, _s = _run("v2 (PyMeshLab + Manifold3D)", lambda: printable_v2.run_make_printable_v2(
-            args.input, output_prefix=os.path.join(outdir, "v2"),
-            taubin_steps=args.taubin_steps, taubin_lambda=args.taubin_lambda,
-            taubin_mu=args.taubin_mu, crease_angle=args.crease_angle,
-            hollow_thickness=args.hollow, **common), args.quiet)
+            args.input, output_prefix=os.path.join(outdir, "v2"), **v2_kwargs), args.quiet)
         results["v2"], logs["v2"] = r, log
         if err:
             print(f"\nv2 FAILED: {err}")
             if args.quiet:
                 print(log)
 
-    print("\nMeasuring both outputs against the same reference mesh...")
+    if "v3" in wanted:
+        r, err, log, _s = _run("v3 (MeshLib repair + Manifold3D)", lambda: printable_v2.run_make_printable_v2(
+            args.input, output_prefix=os.path.join(outdir, "v3"),
+            repair_backend="meshlib", **v2_kwargs), args.quiet)
+        results["v3"], logs["v3"] = r, log
+        if err:
+            print(f"\nv3 FAILED: {err}")
+            if args.quiet:
+                print(log)
+
+    print("\nMeasuring all outputs against the same reference mesh...")
     metrics = {k: _measure(v, reference, args.overhang_angle) for k, v in results.items()}
-    print_table(metrics.get("v1"), metrics.get("v2"))
+    print_table(metrics)
 
     print(f"\nFiles written to: {outdir}")
     for k, m in metrics.items():

@@ -17,6 +17,11 @@ triangles and instead does:
                                     cavities, optionally hollow.
   4. Export         (Manifold3D -> trimesh) -- .stl for the slicer (+ .glb).
 
+repair_backend="meshlib" swaps the repair strategy (not the stages): MeshLib's
+ray-parity orientation fix runs right after cleaning, and its SDF rebuild
+replaces v1's voxel remesh as the last resort. On real TRELLIS meshes that is
+the configuration that wins -- see POSTPROC_V2.md.
+
 The public entry point run_make_printable_v2() mirrors printable.run_make_printable
 (same arguments, same PrintableResult shape) so the two can be swapped in the
 server/CLI and compared directly -- see compare_printable.py.
@@ -40,6 +45,7 @@ import trimesh
 
 import mesh_io
 
+from . import meshlib_repair
 from .printable import (
     PrintableResult,
     bake_colors_from_original,
@@ -72,11 +78,19 @@ class PrintableV2Options:
     close_hole_size: int = 1000
     # Remove enclosed air cavities so the slicer sees one solid mass.
     solid_infill: bool = True
+    # Positive shells whose bounding-box diagonal is below this fraction of the
+    # largest body's are dropped as floating specks (extent, not volume -- see
+    # fill_cavities).
+    min_fragment_ratio: float = 0.005
     # > 0 hollows the solid to this wall thickness (model units) via a
     # Minkowski erosion. Expensive on dense meshes; off by default.
     hollow: float = 0.0
     # Bake appearance onto the new topology when the input had colors/texture.
     bake_colors: bool = True
+    # "meshlib" adds MeshLib's ray-parity orientation repair before the manifold
+    # stage and swaps the last-resort remesh for MeshLib's SDF rebuild.
+    # "pymeshlab" keeps PyMeshLab repairs + v1's voxel remesh.
+    repair_backend: str = "pymeshlab"
     # Voxel pitch for the last-resort v1-style remesh fallback.
     voxel_pitch: Optional[float] = None
 
@@ -372,14 +386,26 @@ def to_manifold(vertices, faces, opts, notes):
         man, f = _ensure_positive(man, v, f, notes)
         return man, v, f, False
 
-    msg = "repairs did not produce a manifold; falling back to v1 voxel remesh"
-    print(f"  {msg}...")
-    print("  Warning: this discards original topology/UVs, exactly like the v1 pipeline.")
-    notes.append(msg)
     tm = trimesh.Trimesh(vertices=v, faces=f, process=False)
     pitch = opts.voxel_pitch or (np.linalg.norm(tm.extents) / 1024.0)
-    remeshed, _used = repair_watertight(tm, pitch, force_solid=True)
-    v, f = np.asarray(remeshed.vertices), np.asarray(remeshed.faces)
+
+    if opts.repair_backend == "meshlib":
+        # MeshLib's SDF rebuild instead of trimesh's binary voxelization: the
+        # distance field is sub-voxel accurate and comes back through dual
+        # marching cubes, so it lands far closer to the original surface for a
+        # fraction of the triangles. Orientation was already repaired above,
+        # which is what makes the winding-number sign detection trustworthy.
+        msg = "repairs did not produce a manifold; rebuilding through MeshLib's SDF"
+        print(f"  {msg}...")
+        notes.append(msg)
+        v, f = meshlib_repair.rebuild(v, f, pitch, notes)
+    else:
+        msg = "repairs did not produce a manifold; falling back to v1 voxel remesh"
+        print(f"  {msg}...")
+        print("  Warning: this discards original topology/UVs, exactly like the v1 pipeline.")
+        notes.append(msg)
+        remeshed, _used = repair_watertight(tm, pitch, force_solid=True)
+        v, f = np.asarray(remeshed.vertices), np.asarray(remeshed.faces)
 
     # The remesh runs after the pre-manifold decimation, so it can blow past the
     # face budget; re-apply it here. Decimation can break manifoldness (that is
@@ -398,13 +424,19 @@ def to_manifold(vertices, faces, opts, notes):
 
     man, v, f = _manifold_with_repair(v, f, opts, notes)
     if man is None:
-        raise RuntimeError("Manifold3D rejected even the voxel remesh")
+        raise RuntimeError("Manifold3D rejected even the remeshed geometry")
     man, f = _ensure_positive(man, v, f, notes)
     return man, v, f, True
 
 
-def fill_cavities(man, notes, min_fragment_ratio=0.01):
-    """Make the solid printable: fill enclosed voids and drop floating fragments.
+def _extent_diagonal(man):
+    """Bounding-box diagonal of a Manifold (bounding_box is min xyz + max xyz)."""
+    box = man.bounding_box()
+    return float(np.linalg.norm(np.array(box[3:]) - np.array(box[:3])))
+
+
+def fill_cavities(man, notes, min_fragment_ratio=0.005):
+    """Make the solid printable: fill enclosed voids and drop floating specks.
 
     In a valid manifold an enclosed cavity is a topologically separate,
     inward-oriented shell, so it shows up in decompose() with a NEGATIVE volume.
@@ -412,9 +444,12 @@ def fill_cavities(man, notes, min_fragment_ratio=0.01):
     with the voids filled -- the exact-arithmetic equivalent of what v1 gets by
     voxel flood-filling, but without resampling the surface.
 
-    Positive shells below min_fragment_ratio of the largest are dropped too:
-    those are the specks a remesh or decimation sheds, and in a slicer they are
-    unprintable floating islands.
+    Specks are judged by bounding-box diagonal, NOT by volume, the same way v1's
+    significant_components() judges input components. A thin whisker has almost
+    no volume but real spatial extent, and dropping it is losing part of the
+    model: measured on a real mesh, a 1% volume threshold discarded whiskers and
+    pushed Hausdorff error from 0.40% to 3.97%, while a 1% extent threshold kept
+    them and cost nothing.
     """
     import manifold3d
 
@@ -427,8 +462,8 @@ def fill_cavities(man, notes, min_fragment_ratio=0.01):
     if not solids:
         return man
 
-    largest = max(p.volume() for p in solids)
-    kept = [p for p in solids if p.volume() >= min_fragment_ratio * largest]
+    largest = max(_extent_diagonal(p) for p in solids)
+    kept = [p for p in solids if _extent_diagonal(p) >= min_fragment_ratio * largest]
     n_specks = len(solids) - len(kept)
 
     if n_voids == 0 and n_specks == 0:
@@ -439,7 +474,7 @@ def fill_cavities(man, notes, min_fragment_ratio=0.01):
         parts_msg.append(f"filled {n_voids} enclosed cavity/cavities")
     if n_specks:
         parts_msg.append(f"dropped {n_specks} floating fragment(s) "
-                         f"< {min_fragment_ratio:.0%} of the main body")
+                         f"< {min_fragment_ratio:.2%} of the main body's size")
     msg = "; ".join(parts_msg)
     print(f"  {msg}")
     notes.append(msg)
@@ -564,6 +599,11 @@ def process_object_v2(mesh, opts, stages, notes):
     print("\n[1/4] Cleaning (PyMeshLab)...")
     t0 = time.time()
     v, f = clean_mesh(v, f, notes)
+    # Orientation first, before anything reads the winding. Every later stage --
+    # Manifold3D, the SDF sign detection, even MeshLib's own importer -- assumes
+    # coherent winding and quietly degrades without it.
+    if opts.repair_backend == "meshlib":
+        f, _n = meshlib_repair.fix_orientation(v, f, notes)
     stages["clean"] = stages.get("clean", 0.0) + time.time() - t0
 
     print("[2/4] Denoising (PyMeshLab Taubin)...")
@@ -581,7 +621,7 @@ def process_object_v2(mesh, opts, stages, notes):
         # staircase artifacts that the earlier denoise pass never saw. Taubin is
         # purely positional -- topology (and therefore manifoldness) is
         # untouched -- but re-validate anyway rather than assume it.
-        print("  Re-denoising the voxel remesh (staircase artifacts)...")
+        print("  Re-denoising the remesh (staircase artifacts)...")
         v_s, f_s = denoise_taubin(v, f, opts, notes)
         man_s, why = _try_manifold(v_s, f_s)
         if man_s is not None:
@@ -592,7 +632,7 @@ def process_object_v2(mesh, opts, stages, notes):
             notes.append(msg)
 
     if opts.solid_infill:
-        man = fill_cavities(man, notes)
+        man = fill_cavities(man, notes, opts.min_fragment_ratio)
     proc = manifold_to_trimesh(man, notes)
     stages["solidify"] = stages.get("solidify", 0.0) + time.time() - t0
     print(f"  Manifold: {len(proc.vertices):,} vertices, {len(proc.faces):,} faces, "
@@ -609,7 +649,8 @@ def process_object_v2(mesh, opts, stages, notes):
                        "uv": None, "base_color_img": None, "mr_img": None,
                        "vertex_colors": new_vertex_colors}
     if used_voxel_fallback:
-        notes.append("voxel fallback was used for this object")
+        notes.append(f"{'meshlib SDF' if opts.repair_backend == 'meshlib' else 'voxel'} "
+                     "remesh fallback was used for this object")
 
     return proc, man, visual_info, new_vertex_colors
 
@@ -633,6 +674,8 @@ def run_make_printable_v2(
     close_hole_size: int = 1000,
     hollow_thickness: float = 0.0,
     bake_colors: bool = True,
+    repair_backend: str = "pymeshlab",
+    min_fragment_ratio: float = 0.005,
 ) -> PrintableV2Result:
     """v2 counterpart of printable.run_make_printable -- same inputs/outputs.
 
@@ -648,6 +691,13 @@ def run_make_printable_v2(
     t_start = time.time()
     stages = {}
     notes = []
+
+    if repair_backend == "meshlib" and not meshlib_repair.available():
+        msg = "repair_backend='meshlib' requested but the meshlib SDK is not installed; using pymeshlab"
+        print(f"  Warning: {msg}")
+        notes.append(msg)
+        repair_backend = "pymeshlab"
+
     opts = PrintableV2Options(
         target_faces=target_faces,
         taubin_lambda=taubin_lambda,
@@ -659,6 +709,8 @@ def run_make_printable_v2(
         hollow=hollow_thickness,
         bake_colors=bake_colors,
         voxel_pitch=voxel_pitch,
+        repair_backend=repair_backend,
+        min_fragment_ratio=min_fragment_ratio,
     )
 
     print(f"Loading: {glb_path}")
@@ -720,7 +772,7 @@ def run_make_printable_v2(
         t0 = time.time()
         combined_man = union_parts(mans, notes)
         if opts.solid_infill:
-            combined_man = fill_cavities(combined_man, notes)
+            combined_man = fill_cavities(combined_man, notes, opts.min_fragment_ratio)
         if opts.hollow > 0:
             combined_man = hollow(combined_man, opts.hollow, notes)
         combined = manifold_to_trimesh(combined_man, notes)
