@@ -60,6 +60,44 @@ def get_or_load_pipeline():
     return _pipeline
 
 
+def _run_printable(pipeline: str, *, glb_path: str, output_prefix: str):
+    """Run the requested print-prep pipeline; degrade to v1 rather than fail.
+
+    v2/v3 need optional extras (pymeshlab, manifold3d, meshlib). If they are not
+    installed on this machine, a job must still produce a printable file -- so an
+    ImportError falls back to v1, which needs only trimesh. Any OTHER exception
+    propagates: a genuine geometry failure should surface as a job error, not be
+    silently papered over with a worse result.
+    """
+    if pipeline in ("v2", "v3"):
+        try:
+            from trellis_core.printable_v2 import run_make_printable_v2
+
+            return run_make_printable_v2(
+                glb_path=glb_path,
+                output_prefix=output_prefix,
+                target_faces=config.PRINTABLE_TARGET_FACES,
+                overhang_angle=config.PRINTABLE_OVERHANG_ANGLE,
+                solid_infill=config.PRINTABLE_SOLID_INFILL,
+                repair_backend="meshlib" if pipeline == "v3" else "pymeshlab",
+            )
+        except ImportError as e:
+            log.warning(
+                "Print-prep %s unavailable (%s); falling back to v1. "
+                "Install the extras with: pip install -e \".[postproc-v2]\"", pipeline, e,
+            )
+
+    from trellis_core.printable import run_make_printable
+
+    return run_make_printable(
+        glb_path=glb_path,
+        output_prefix=output_prefix,
+        target_faces=config.PRINTABLE_TARGET_FACES,
+        overhang_angle=config.PRINTABLE_OVERHANG_ANGLE,
+        solid_infill=config.PRINTABLE_SOLID_INFILL,
+    )
+
+
 def _run_job(store: JobStore, job_id: str) -> None:
     """Run one job through all stages. May raise -- worker_loop catches it."""
     # Imports kept local so this module is importable even before torch exists,
@@ -149,16 +187,12 @@ def _run_job(store: JobStore, job_id: str) -> None:
     diagnostics = None
     fidelity = None
     if not params.get("skip_printable"):
-        from trellis_core.printable import run_make_printable
-
         store.update(job_id, status=JobStatus.MAKING_PRINTABLE)
         t0 = time.time()
-        printable = run_make_printable(
+        printable = _run_printable(
+            params.get("printable_pipeline") or config.PRINTABLE_PIPELINE,
             glb_path=glb_path,
             output_prefix=f"{output_dir}/model_printable",
-            target_faces=config.PRINTABLE_TARGET_FACES,
-            overhang_angle=config.PRINTABLE_OVERHANG_ANGLE,
-            solid_infill=config.PRINTABLE_SOLID_INFILL,
         )
         _record_timing(store, job_id, "make_printable", time.time() - t0)
         diagnostics = printable.diagnostics

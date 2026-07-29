@@ -44,6 +44,18 @@ PRINTABLE_OVERHANG_ANGLE = float(os.environ.get("TRELLIS_OVERHANG_ANGLE", "45.0"
 PRINTABLE_SOLID_INFILL = _as_bool(os.environ.get("TRELLIS_SOLID_INFILL", "1"))
 SKIP_PRINTABLE_BY_DEFAULT = _as_bool(os.environ.get("TRELLIS_SKIP_PRINTABLE", "0"))
 
+# Which print-prep implementation runs. Measured on real job meshes, v3 beats v1
+# on every axis -- ~2x faster, 4-7x smaller files, 20x closer to the original
+# surface, and watertight where v1 was not (see POSTPROC_V2.md) -- so it is the
+# default. v1 stays selectable per job (and via TRELLIS_PRINTABLE_PIPELINE) as
+# the fallback: it needs only trimesh, while v2/v3 need the optional
+# pymeshlab/manifold3d/meshlib extras.
+#   v1 -- trellis_core/printable.py: trimesh repair + voxel flood-fill
+#   v2 -- printable_v2.py: PyMeshLab clean/Taubin + Manifold3D
+#   v3 -- printable_v2.py with MeshLib orientation repair + SDF rebuild
+PRINTABLE_PIPELINE = os.environ.get("TRELLIS_PRINTABLE_PIPELINE", "v3")
+ALLOWED_PRINTABLE_PIPELINES = ("v1", "v2", "v3")
+
 # --- Server / networking ----------------------------------------------------
 HOST = os.environ.get("TRELLIS_HOST", "0.0.0.0")
 PORT = int(os.environ.get("TRELLIS_PORT", "8000"))

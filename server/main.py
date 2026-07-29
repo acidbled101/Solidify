@@ -233,6 +233,7 @@ async def create_job(
     target_faces: str = Form(None),
     skip_printable: str = Form(None),
     skip_texture: str = Form(None),
+    printable_pipeline: str = Form(None),
 ):
     if worker.queue_depth() >= config.MAX_QUEUE_DEPTH:
         return _error(429, f"Queue is full ({config.MAX_QUEUE_DEPTH} jobs waiting). Try again shortly.")
@@ -269,6 +270,10 @@ async def create_job(
     if target_faces_v <= 0:
         return _error(400, "target_faces must be a positive integer.")
 
+    printable_pipeline_v = printable_pipeline or config.PRINTABLE_PIPELINE
+    if printable_pipeline_v not in config.ALLOWED_PRINTABLE_PIPELINES:
+        return _error(400, f"printable_pipeline must be one of {config.ALLOWED_PRINTABLE_PIPELINES}.")
+
     skip_printable_v = (
         _as_bool(skip_printable) if skip_printable is not None else config.SKIP_PRINTABLE_BY_DEFAULT
     )
@@ -283,6 +288,7 @@ async def create_job(
         "target_faces": target_faces_v,
         "skip_printable": skip_printable_v,
         "skip_texture": skip_texture_v,
+        "printable_pipeline": printable_pipeline_v,
     }
 
     operator = getattr(request.state, "user", "anonymous")
@@ -348,6 +354,8 @@ async def get_config():
         "default_seed": config.DEFAULT_SEED,
         "default_target_faces": config.DEFAULT_TARGET_FACES,
         "skip_printable_by_default": config.SKIP_PRINTABLE_BY_DEFAULT,
+        "printable_pipelines": list(config.ALLOWED_PRINTABLE_PIPELINES),
+        "default_printable_pipeline": config.PRINTABLE_PIPELINE,
         "skip_texture_by_default": config.SKIP_TEXTURE_BY_DEFAULT,
         "no_texture": config.NO_TEXTURE,
         "max_upload_mb": config.MAX_UPLOAD_MB,
