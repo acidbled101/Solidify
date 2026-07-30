@@ -10,9 +10,12 @@ What it can and cannot cover:
 
   * COVERED -- everything hardware-independent: the timestep schedule, the
     sampler-params split, the voxel adjacency construction, the differentiable
-    detail proxy, the preference loss, the trust-region projection, and the
+    detail proxy, the preference loss, the trust-region projection, the
     end-to-end "gradients reach delta and nothing else" property of the
-    differentiable Euler continuation.
+    differentiable Euler continuation, the branch-window arithmetic across
+    small step counts, the sampler-default backfill, and _rank's degradation
+    behavior across every combination of failed decodes / non-finite scores.
+    See also geometric_judge_test.py for that module's own coverage.
 
   * NOT COVERED -- anything needing MPS or the real TRELLIS.2 weights:
     sample_shape_slat_with_dpo_branch() itself, SparseTensor interop,
@@ -39,8 +42,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import numpy as np
 import torch
 import torch.nn as nn
+import trimesh
 
 from trellis_core import dpo_branch
+from trellis_core import geometric_judge
 
 
 # ---------------------------------------------------------------------------
@@ -413,6 +418,43 @@ def test_backfill_sampler_defaults():
     print("  backfill_sampler_defaults: fills missing guidance defaults, never overrides supplied values")
 
 
+def test_rank_degradation():
+    """_rank() must degrade gracefully -- and _rank's return value, not some
+    other signal, is what a caller should use to decide which branch to fall
+    back to. Regression test for a bug a holistic review caught: a prior
+    version computed the both-decode-failed fallback from `mesh_ref is None`
+    directly, which can't distinguish "reference failed, delta decoded" from
+    "both failed" once mesh_delta has already been deleted -- it resumed from
+    the random delta branch while reporting "resumed from reference"."""
+    box = trimesh.creation.box(extents=[1, 1, 1])
+
+    # both decodes failed -- reference wins by convention, nothing crashes
+    won, score_a, score_b = dpo_branch._rank(None, None, None, np.random.default_rng(0))
+    assert won is False and score_a is None and score_b is None
+
+    # only the reference failed to decode -- delta wins by default (there's
+    # nothing else to compare against)
+    won, score_a, score_b = dpo_branch._rank(None, box, None, np.random.default_rng(0))
+    assert won is True and score_a is None and score_b is not None
+
+    # only the delta branch failed to decode
+    won, score_a, score_b = dpo_branch._rank(box, None, None, np.random.default_rng(0))
+    assert won is False and score_a is not None and score_b is None
+
+    # both decoded but both score non-finite -- geometric_judge.rank_candidates
+    # itself raises ValueError here; _rank must catch it and degrade (treat
+    # like a failed decode), not propagate and kill the whole generation.
+    bad_a = box.copy()
+    bad_a.vertices[0] = [np.nan, np.nan, np.nan]
+    bad_b = box.copy()
+    bad_b.vertices[0] = [np.nan, np.nan, np.nan]
+    won, score_a, score_b = dpo_branch._rank(bad_a, bad_b, None, np.random.default_rng(0))
+    assert won is False, "no usable verdict -> must default to the reference, not raise"
+    assert score_a is not None and score_b is not None  # scores ARE returned, just not comparable
+
+    print("  _rank: degrades gracefully on every failure combination, never raises")
+
+
 def test_sparse_conv_backend_restores_env():
     """The env override must be scoped and restored (TRELLIS.2 may be absent)."""
     import os
@@ -437,6 +479,7 @@ TESTS = [
     test_project_delta,
     test_select_branch_window,
     test_backfill_sampler_defaults,
+    test_rank_degradation,
     test_config_clamps,
     test_sparse_conv_backend_restores_env,
     test_gradients_reach_delta_only,

@@ -127,10 +127,11 @@ def run_generation_with_dpo(
         # doesn't error, it silently mis-scales every vertex (a '1024' mesh
         # decoded at decode_resolution=512 comes out ~2x oversized and
         # translated out of the unit cube), which then makes every
-        # geometric_judge verdict at the branch point meaningless. If a
-        # caller passed an explicit dpo_config, respect it (it's their
-        # decision) but only after this check ran; if they didn't, build one
-        # with the resolution filled in correctly instead of guessing.
+        # geometric_judge verdict at the branch point meaningless. This is
+        # NOT a caller-overridable choice -- decode_resolution is fully
+        # determined by pipeline_type, so a mismatched explicit dpo_config
+        # gets overridden unconditionally (with a loud print, not silently),
+        # the same as one built with the wrong default.
         print(
             f"[dpo_generation] dpo_config.decode_resolution="
             f"{dpo_config.decode_resolution} does not match pipeline_type="

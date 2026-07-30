@@ -341,6 +341,19 @@ def rank_candidates(
     is non-finite, the finite candidate wins automatically (a NaN/inf score
     must never be preferred just because it compares False on both sides of
     `>=`).
+
+    A failed thickness ray-cast (JudgeScore.thickness_valid=False) defaults
+    L_Th to 0.0 -- the BEST possible value, not "no problem". This matters in
+    exactly the case that's common mid-generation: a mesh riddled with holes
+    (the plan's own "Topological Stalls" risk row) is precisely the kind of
+    mesh whose inward rays escape through a hole and hit nothing, so without
+    this guard the MORE broken candidate would score a free pass on L_Th and
+    could win on that alone. If either candidate's thickness measurement is
+    unreliable, gamma*L_Th is dropped from BOTH sides' comparison value (not
+    just the invalid one) before picking a winner -- an unmeasured candidate
+    must not win by default just because its unmeasured penalty reads as
+    zero. This only adjusts the WINNER decision; the .total each JudgeScore
+    reports is unchanged.
     """
     weights = weights or JudgeWeights()
     shared_rng = rng or np.random.default_rng()
@@ -354,8 +367,12 @@ def rank_candidates(
     score_b_rng.bit_generator.state = seed_state
     score_b = score_mesh(mesh_b, weights, score_b_rng)
 
-    a_finite = math.isfinite(score_a.total)
-    b_finite = math.isfinite(score_b.total)
+    thickness_reliable = score_a.thickness_valid and score_b.thickness_valid
+    cmp_a = score_a.total if thickness_reliable else score_a.total + weights.gamma * score_a.thickness_penalty
+    cmp_b = score_b.total if thickness_reliable else score_b.total + weights.gamma * score_b.thickness_penalty
+
+    a_finite = math.isfinite(cmp_a)
+    b_finite = math.isfinite(cmp_b)
     if not a_finite and not b_finite:
         raise ValueError(
             "rank_candidates: both candidates scored non-finite -- "
@@ -364,5 +381,5 @@ def rank_candidates(
     if a_finite != b_finite:
         winner_index = 0 if a_finite else 1
     else:
-        winner_index = 0 if score_a.total >= score_b.total else 1
+        winner_index = 0 if cmp_a >= cmp_b else 1
     return winner_index, score_a, score_b

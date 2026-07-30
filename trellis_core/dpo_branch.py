@@ -298,9 +298,21 @@ def sparse_conv_backend(backend: str = "none"):
     prev_conv = None
     sparse_config = None
 
-    os.environ["SPARSE_CONV_BACKEND"] = backend
     try:
         try:
+            # Import (or fetch the already-imported module) and capture
+            # prev_conv BEFORE touching the env var. config.py reads
+            # SPARSE_CONV_BACKEND from the environment at IMPORT time into
+            # its own module-level CONV -- if we set the env var first and
+            # this import is what first triggers that read (nothing had
+            # imported trellis2.modules.sparse.config yet in this process),
+            # prev_conv would capture the OVERRIDE value instead of the true
+            # previous one, and the `finally` "restore" below becomes a
+            # no-op: CONV stays permanently pinned to the override for the
+            # rest of the process. Not reachable through the real pipeline
+            # (fully imported long before this ever runs), but reachable
+            # from tests or any future caller that runs this before model
+            # load -- worth getting the ordering right regardless.
             sparse_config = importlib.import_module("trellis2.modules.sparse.config")
             conv_dispatch = importlib.import_module("trellis2.modules.sparse.conv.conv")
             prev_conv = sparse_config.CONV
@@ -308,6 +320,7 @@ def sparse_conv_backend(backend: str = "none"):
                 conv_dispatch._backends[backend] = importlib.import_module(
                     f"trellis2.modules.sparse.conv.conv_{backend}"
                 )
+            os.environ["SPARSE_CONV_BACKEND"] = backend
             sparse_config.set_conv_backend(backend)
         except Exception as e:  # pragma: no cover - depends on TRELLIS.2 presence
             # Not fatal: worst case we run the differentiable segment on the
@@ -315,7 +328,10 @@ def sparse_conv_backend(backend: str = "none"):
             # backward graph. Say so loudly rather than silently continuing.
             # A "No module named ...conv_none" here means patches/mps_compat.py
             # has not been run against this TRELLIS.2 checkout -- that script is
-            # what copies backends/conv_none.py into the trellis2 tree.
+            # what copies backends/conv_none.py into the trellis2 tree. Still
+            # set the env var for any lazily-imported consumer even though the
+            # in-memory config.CONV flip didn't happen.
+            os.environ["SPARSE_CONV_BACKEND"] = backend
             print(f"[dpo_branch] could not switch sparse-conv backend to '{backend}': {e}")
         yield
     finally:
@@ -479,7 +495,7 @@ def steer_delta(
     lr: float,
     max_rms: float,
 ) -> Tuple[List[float], List[float], List[float]]:
-    """Run `num_steps` Adam steps on `delta` alone under the preference loss.
+    """Run `num_steps` SGD steps on `delta` alone under the preference loss.
 
     `continue_fn(delta) -> proxy_delta` must rebuild the differentiable
     continuation from the branch point with the current delta and return the
@@ -631,7 +647,19 @@ def backfill_sampler_defaults(sampler, inference_kwargs: Dict[str, Any]) -> Dict
     for name, param in sig.parameters.items():
         if name in filled or param.default is inspect.Parameter.empty:
             continue
-        if name in ("self", "model", "noise", "cond", "neg_cond", "steps", "verbose"):
+        if name in ("self", "model", "noise", "cond", "neg_cond", "steps", "verbose",
+                    "rescale_t", "tqdm_desc"):
+            # rescale_t belongs to the SCHEDULE (split_sampler_params already
+            # popped it out of inference_kwargs into build_t_pairs' own
+            # rescale_t argument) -- backfilling it here would re-inject the
+            # SIGNATURE's default value (1.0) as a MODEL kwarg, silently
+            # diverging from whatever rescale_t was actually configured and
+            # actually used to build t_pairs. Harmless today only because
+            # every real flow-model forward ends in **kwargs and swallows
+            # unknown keys (SLatFlowModel.forward, structured_latent_flow.py)
+            # -- a future model/mixin with a stricter signature would turn
+            # this into a TypeError on every step. tqdm_desc is cosmetic and
+            # not a model kwarg at all.
             continue
         filled[name] = param.default
     return filled
@@ -731,10 +759,19 @@ def _denormalize(slat, normalization: Optional[dict]):
 
 
 def _rank(mesh_a, mesh_b, weights, rng):
-    """rank_candidates with graceful degradation when a branch failed to decode.
+    """rank_candidates with graceful degradation when a branch failed to
+    decode OR both candidates scored non-finite.
 
     Returns (delta_branch_won: bool, score_a, score_b) where branch A is the
     reference and branch B is the delta branch.
+
+    geometric_judge.rank_candidates() raises ValueError when both candidates
+    score non-finite (e.g. both diverged) -- reasonable for that function in
+    isolation (there's no sane winner), but everywhere ELSE in this module a
+    broken branch degrades gracefully (empty decode -> skip steering, resume
+    from the reference) rather than aborting the whole generation. The same
+    degradation applies here: no usable verdict means treat it exactly like
+    a failed decode -- reference wins by default, generation continues.
     """
     if mesh_a is None and mesh_b is None:
         return False, None, None
@@ -742,7 +779,10 @@ def _rank(mesh_a, mesh_b, weights, rng):
         return True, None, geometric_judge.score_mesh(mesh_b, weights, rng)
     if mesh_b is None:
         return False, geometric_judge.score_mesh(mesh_a, weights, rng), None
-    winner, score_a, score_b = geometric_judge.rank_candidates(mesh_a, mesh_b, weights, rng)
+    try:
+        winner, score_a, score_b = geometric_judge.rank_candidates(mesh_a, mesh_b, weights, rng)
+    except ValueError:
+        return False, geometric_judge.score_mesh(mesh_a, weights, rng), geometric_judge.score_mesh(mesh_b, weights, rng)
     return winner == 1, score_a, score_b
 
 
@@ -820,6 +860,18 @@ def sample_shape_slat_with_dpo_branch(
     # Not currently reachable anywhere in this repo (generate.py/server never
     # pass num_samples>1, and Trellis2ImageTo3DPipeline.run() defaults to 1),
     # so fail loudly rather than silently mis-steering if that ever changes.
+    # Check emptiness FIRST: coords.numel()==0 means sample_sparse_structure
+    # found zero occupied voxels, which is itself a watchdog-style failure
+    # (see WatchdogError elsewhere in this codebase) -- .max() on a 0-element
+    # tensor raises a bare RuntimeError, not the AssertionError callers like
+    # dpo_generation.py's watchdog signature check are looking for, so
+    # checking numel() first turns that into a readable AssertionError
+    # instead of a confusing crash on an unrelated line.
+    assert coords.numel() > 0, (
+        "sample_shape_slat_with_dpo_branch received empty coords (0 occupied "
+        "voxels) -- likely the same macOS GPU-watchdog issue documented in "
+        "trellis_core/pipeline.py's WatchdogError."
+    )
     assert int(coords[:, 0].max().item()) == 0, (
         "sample_shape_slat_with_dpo_branch only supports num_samples=1 -- "
         "the judge/steering only look at sample 0's decoded mesh."
@@ -938,7 +990,17 @@ def sample_shape_slat_with_dpo_branch(
         if not decode_ok:
             loss_history, proxy_history, rms_history = [], [], []
             delta_won_final, score_delta_final = delta_won, score_delta
-            fallback_is_delta = mesh_ref is None  # reference failed but delta decoded
+            # `delta_won` (from _rank, above) is already the right signal:
+            # _rank returns False when BOTH mesh_ref and mesh_delta are None
+            # (line ~740), True when only mesh_ref is None (reference
+            # failed, delta decoded). A prior version used
+            # `mesh_ref is None` directly, which can't tell "reference
+            # failed" apart from "both failed" (mesh_delta was already
+            # deleted above by this point either way) -- with both failed it
+            # evaluated True and resumed from the random, unvalidated delta
+            # branch while still printing/reporting "resuming from
+            # reference".
+            fallback_is_delta = delta_won
             x = (_x_b if fallback_is_delta else x_ref).detach()
             del _x_b, pred_x0_b, pred_x0_ref, x_ref, mesh_ref
         else:
