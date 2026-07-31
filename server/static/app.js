@@ -8,6 +8,7 @@
 (function () {
   var DEMO = new URLSearchParams(location.search).has("demo");
   var LS_KEY = "trellis_job_id";
+  var LS_TOKEN = "solidify_token"; // persisted login token → "stay signed in"
   var appEl = document.getElementById("app");
 
   var ASSETS = {
@@ -24,12 +25,16 @@
     authName: "", authKey: "", authError: false,
     phase: "idle",                // idle | uploaded | busy | warming | running | success | error
     photoSrc: null, photoName: "", photoSize: "", photoFile: null,
-    seed: "", detail: 80000, quality: "standard", skipPrep: false, advOpen: false,
+    seed: "", detail: 1000000, quality: "standard", skipPrep: false, skipTexture: false,
+    printablePipeline: "v3", advOpen: false,
     prog: 0, stageIdx: -1, log: [], queuePos: 0, busyReason: "", errMsg: "", errHint: "", dragOver: false,
     jobId: "",
     infoRows: null, diagRows: null, previewSrc: null, previewPath: null, libDraft: null,
     dlSTL: null, dlSTLName: "", dlGLB: null, dlGLBName: "",
     queueDepth: 0, maxUploadMB: 15,
+    libraryItems: null,           // null = not loaded yet; array once /api/library answers
+    jobElapsed: null,             // seconds since the running job started (server-anchored)
+    _elapsedAnchor: 0,            // performance.now() when jobElapsed was last set
     funIdx: 0,
     _poll: null, _sim: null, _health: null, _retry: null, _fun: null,
   };
@@ -72,6 +77,19 @@
   function stageLog(st) { return (STATUS[st] && STATUS[st].log) || ("> " + st); }
   function authHeaders(extra) { var h = Object.assign({}, extra || {}); if (AUTH) h.Authorization = AUTH; return h; }
   function api(path, opts) { opts = opts || {}; opts.headers = authHeaders(opts.headers); return fetch(path, opts); }
+  // btoa() only handles Latin-1; encode UTF-8 first so passwords with any
+  // character survive the round-trip to the server's base64→utf-8 decode.
+  function b64utf8(s) {
+    var bytes = new TextEncoder().encode(s), bin = "";
+    for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return btoa(bin);
+  }
+  // Live per-job time estimate (minutes): the real DB average when available,
+  // else a sensible default. Replaces the old hardcoded "~5 MIN".
+  function jobTimeMins() {
+    var s = serverConfig && serverConfig.avg_job_seconds;
+    return (s && s > 0) ? Math.max(1, Math.round(s / 60)) : 6;
+  }
 
   // Auth-aware file access. Downloads (<a download>) and the 3D preview's
   // GLTFLoader fetch are plain browser GETs that do NOT carry our in-memory
@@ -91,22 +109,31 @@
     _objectUrls = [];
   }
 
-  // ---- Library (client-side gallery of past generations) -------------------
-  // Persisted per-browser in localStorage: each entry holds a 3D snapshot
-  // (data URL), stats, and the download paths. Downloads hit the live API, so
-  // they work while the lab machine still holds the job (jobs are in-memory).
-  var LIB_KEY = "solidify_library";
-  function loadLibrary() { try { return JSON.parse(localStorage.getItem(LIB_KEY) || "[]"); } catch (e) { return []; } }
-  function saveLibrary(list) { try { localStorage.setItem(LIB_KEY, JSON.stringify(list.slice(0, 40))); } catch (e) { /* quota — oldest dropped by slice */ } }
-  function addToLibrary(entry) {
-    var list = loadLibrary().filter(function (e) { return e.id !== entry.id; });
-    list.unshift(entry);
-    saveLibrary(list);
+  // ---- Library (server-backed shared archive) ------------------------------
+  // The lab's persistent gallery of every generated model lives in the local
+  // SQLite DB on the Mac (server/db.py) and is shared across all operators. We
+  // fetch it from GET /api/library; each card's 3D snapshot is rendered in the
+  // browser after a job finishes and POSTed up to that model's row.
+  async function refreshLibrary() {
+    try {
+      var data = await (await api("/api/library")).json();
+      state.libraryItems = (data && data.models) || [];
+    } catch (e) { state.libraryItems = state.libraryItems || []; }
     if (state.screen === "library") render();
   }
-  function removeFromLibrary(id) { saveLibrary(loadLibrary().filter(function (e) { return e.id !== id; })); }
-  function fmtDate(iso) {
-    try { var d = new Date(iso); return d.toLocaleDateString() + " · " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }); }
+  // Attach the browser-rendered 3D snapshot (a data: URL) to the model's row.
+  async function saveThumb(jobId, thumb) {
+    if (!jobId || !thumb) return;
+    try {
+      await api("/api/library/" + encodeURIComponent(jobId) + "/thumb", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ thumb: thumb }),
+      });
+    } catch (e) { /* thumbnail is best-effort; the row already exists server-side */ }
+  }
+  function fmtDate(when) {
+    try { var d = new Date(when); return d.toLocaleDateString() + " · " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }); }
     catch (e) { return ""; }
   }
 
@@ -120,8 +147,10 @@
       serverConfig = await r.json();
       if (serverConfig) {
         var df = parseInt(serverConfig.default_target_faces, 10);
-        if (!isNaN(df)) state.detail = Math.max(20000, Math.min(200000, df));
+        if (!isNaN(df)) state.detail = Math.max(200000, Math.min(2000000, df));
         if (serverConfig.skip_printable_by_default) state.skipPrep = true;
+        if (serverConfig.skip_texture_by_default) state.skipTexture = true;
+        if (serverConfig.default_printable_pipeline) state.printablePipeline = serverConfig.default_printable_pipeline;
         if (serverConfig.max_upload_mb) state.maxUploadMB = serverConfig.max_upload_mb;
       }
       refreshHealth();
@@ -216,6 +245,7 @@
     appEl.innerHTML = html;
     enhance();
     if (state.screen === "studio" && state.phase === "idle") refreshActivity();
+    if (state.screen === "library" && state.libraryItems === null) refreshLibrary();
     if (state.screen === "studio" && state.phase === "running") startFun(); else stopFun();
   }
 
@@ -349,7 +379,7 @@
               '<button class="h-ghost" data-act="gotoAbout" style="background:none;border:1px solid rgba(53,242,226,.45);color:#35F2E2;padding:17px 28px;font-family:\'IBM Plex Mono\',monospace;font-size:13px;letter-spacing:.18em;cursor:pointer;white-space:nowrap">HOW IT WORKS</button>' +
             '</div>' +
             '<div data-reveal style="display:flex;flex-wrap:wrap;margin-top:40px;border:1px solid rgba(53,242,226,.2);background:rgba(1,8,7,.65)">' +
-              stat("1", "PHOTO NEEDED", true) + stat("~5<span style=\"font-size:.55em\"> MIN</span>", "PER JOB", true) + stat("STL·GLB", "OUTPUT FILES", true) + stat("0", "INSTALLS", false) +
+              stat("1", "PHOTO NEEDED", true) + stat("~" + jobTimeMins() + "<span style=\"font-size:.55em\"> MIN</span>", "PER JOB", true) + stat("STL·GLB", "OUTPUT FILES", true) + stat("0", "INSTALLS", false) +
             '</div>' +
           '</div>' +
           '<div data-reveal style="flex:1 1 340px;display:flex;justify-content:center">' +
@@ -418,7 +448,7 @@
         card("// THE MACHINE", "All computation runs on one lab Mac with a GPU — the site only sends your image and displays the result, over a secure tunnel. One job runs at a time and takes a few minutes. First job after a restart waits ~100 seconds while the model warms up.") +
         card("// WHO IT'S FOR", "Primary users are professors at the lab who want 3D-printable files from photos, fast, from their own devices. Access is restricted to an approved list managed by the lab admin. Students and other lab members: to be decided.") +
         card("// UNDER THE HOOD", '<div style="font-family:\'IBM Plex Mono\',monospace;font-size:13px;color:#8fd8cf;line-height:2.2">&gt; silhouette + depth extraction<br />&gt; volumetric field generation<br />&gt; marching cubes → mesh<br />&gt; decimation to target faces<br />&gt; watertight print-prep (hole sealing, wall thickening)<br />&gt; STL + GLB packaging</div>') +
-        card("// ROADMAP", '<span style="color:#6BFF2E">▸</span> Proper accounts with an owner-managed allow-list<br /><span style="color:#57c9bf">▸</span> History / gallery of past generations<br /><span style="color:#57c9bf">▸</span> Print instructions &amp; slicer hand-off<br /><span style="color:#57c9bf">▸</span> English / Arabic support') +
+        card("// ROADMAP", '<span style="color:#6BFF2E">✓</span> Per-operator accounts with an admin-managed allow-list<br /><span style="color:#6BFF2E">✓</span> Shared history / gallery of past generations<br /><span style="color:#57c9bf">▸</span> Print instructions &amp; slicer hand-off<br /><span style="color:#57c9bf">▸</span> English / Arabic support') +
       '</div>' +
       '<div style="display:flex;justify-content:center;padding:0 20px clamp(48px,8vh,80px)"><button data-act="gotoStudio" data-magnet class="h-primary" style="background:#35F2E2;color:#02201c;border:none;padding:18px 40px;font-size:17px;font-weight:700;letter-spacing:.1em;cursor:pointer;box-shadow:0 0 34px rgba(53,242,226,.45)">START A SCAN →</button></div>' +
     '</div>';
@@ -426,21 +456,25 @@
 
   // ---- LIBRARY -------------------------------------------------------------
   function renderLibrary() {
-    var lib = loadLibrary();
+    var loading = state.libraryItems === null;
+    var lib = state.libraryItems || [];
+    var count = loading ? "…" : (lib.length + " MODEL" + (lib.length === 1 ? "" : "S"));
     var header = '<div style="display:flex;flex-wrap:wrap;align-items:flex-end;gap:16px;margin-bottom:8px">' +
         '<div><div style="font-family:\'IBM Plex Mono\',monospace;font-size:11px;letter-spacing:.32em;color:#57c9bf;margin-bottom:8px">ARCHIVE</div>' +
         '<div style="font-size:clamp(28px,4vw,44px);font-weight:700"><glitch-text text="SPECIMEN LIBRARY" speed="20"></glitch-text></div></div>' +
         '<div style="flex:1"></div>' +
-        '<div style="font-family:\'IBM Plex Mono\',monospace;font-size:11px;letter-spacing:.18em;color:#57c9bf">' + lib.length + ' MODEL' + (lib.length === 1 ? "" : "S") + ' ON THIS DEVICE</div>' +
+        '<div style="font-family:\'IBM Plex Mono\',monospace;font-size:11px;letter-spacing:.18em;color:#57c9bf">' + count + ' IN THE LAB ARCHIVE</div>' +
       '</div>' +
-      '<div style="font-family:\'IBM Plex Mono\',monospace;font-size:11px;letter-spacing:.06em;color:#3f7a73;line-height:1.7;margin-bottom:28px">Everything you’ve solidified, saved on this browser. Downloads pull from the lab machine while it still holds the job.</div>';
+      '<div style="font-family:\'IBM Plex Mono\',monospace;font-size:11px;letter-spacing:.06em;color:#3f7a73;line-height:1.7;margin-bottom:28px">Every model the lab has solidified, stored on the Mac and shared across all operators. Downloads pull from the lab machine while it still holds the job.</div>';
 
     var body;
-    if (!lib.length) {
+    if (loading) {
+      body = '<div style="font-family:\'IBM Plex Mono\',monospace;font-size:12px;letter-spacing:.14em;color:#57c9bf;padding:40px 4px">Loading the archive…</div>';
+    } else if (!lib.length) {
       body = '<div style="border:1px dashed rgba(53,242,226,.3);background:rgba(4,28,26,.35);padding:clamp(36px,7vh,80px) 24px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:16px">' +
         '<div style="width:56px;height:56px;border:1.5px solid rgba(53,242,226,.5);display:flex;align-items:center;justify-content:center;font-size:24px;color:#35F2E2">□</div>' +
         '<div style="font-size:20px;font-weight:600">No models yet.</div>' +
-        '<div style="font-size:14px;color:#a8ded7;max-width:42ch;line-height:1.6">Solidify your first photo and it lands here — with a live 3D snapshot and one-click STL / GLB downloads.</div>' +
+        '<div style="font-size:14px;color:#a8ded7;max-width:42ch;line-height:1.6">Solidify your first photo and it lands here — with a live 3D snapshot and one-click STL / GLB downloads, for the whole lab to see.</div>' +
         '<button data-act="gotoStudio" data-magnet class="h-primary" style="margin-top:6px;background:#35F2E2;color:#02201c;border:none;padding:15px 30px;font-size:15px;font-weight:700;letter-spacing:.1em;cursor:pointer;box-shadow:0 0 30px rgba(53,242,226,.4)">START A SCAN →</button>' +
       '</div>';
     } else {
@@ -451,22 +485,30 @@
       header + body + '</div>';
   }
 
+  // Server model row -> card. Downloads are built from the job's files list and
+  // hit /api/jobs/<id>/files/<name> (works while the lab machine still holds the
+  // job in memory). Each card is labelled with the operator who made it.
   function libCard(e) {
+    var files = e.files || [];
+    var base = "/api/jobs/" + encodeURIComponent(e.job_id) + "/files/";
+    var stl = files.filter(function (f) { return /\.stl$/i.test(f.filename); })[0];
+    var glb = files.filter(function (f) { return /\.glb$/i.test(f.filename); })[0];
     var wt = e.watertight === false ? '<span style="color:#FFB454">NOT WATERTIGHT</span>'
       : (e.watertight ? '<span style="color:#6BFF2E">WATERTIGHT ✓</span>' : '');
     var thumb = e.thumb
       ? '<img src="' + esc(e.thumb) + '" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover" />'
       : '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#2e5d57;font-family:\'IBM Plex Mono\',monospace;font-size:11px">NO PREVIEW</div>';
-    var stlBtn = e.stl ? '<button data-act="dl" data-path="' + esc(e.stl) + '" data-name="' + esc(e.stlName || "model.stl") + '" class="h-primary" style="flex:1;background:#35F2E2;color:#02201c;border:none;padding:10px;font-size:12px;font-weight:700;letter-spacing:.08em;cursor:pointer">↓ STL</button>' : "";
-    var glbBtn = e.glb ? '<button data-act="dl" data-path="' + esc(e.glb) + '" data-name="' + esc(e.glbName || "model.glb") + '" class="h-ghost" style="flex:1;background:none;border:1px solid rgba(53,242,226,.45);color:#35F2E2;padding:10px;font-size:12px;font-weight:600;letter-spacing:.08em;cursor:pointer;font-family:\'IBM Plex Mono\',monospace">↓ GLB</button>' : "";
+    var stlBtn = stl ? '<button data-act="dl" data-path="' + esc(base + stl.filename) + '" data-name="' + esc(stl.filename) + '" class="h-primary" style="flex:1;background:#35F2E2;color:#02201c;border:none;padding:10px;font-size:12px;font-weight:700;letter-spacing:.08em;cursor:pointer">↓ STL</button>' : "";
+    var glbBtn = glb ? '<button data-act="dl" data-path="' + esc(base + glb.filename) + '" data-name="' + esc(glb.filename) + '" class="h-ghost" style="flex:1;background:none;border:1px solid rgba(53,242,226,.45);color:#35F2E2;padding:10px;font-size:12px;font-weight:600;letter-spacing:.08em;cursor:pointer;font-family:\'IBM Plex Mono\',monospace">↓ GLB</button>' : "";
+    var owner = e.operator ? '<span style="color:#7CFFF1">by ' + esc(e.operator) + '</span>' : "";
+    var when = e.created_at ? fmtDate(e.created_at * 1000) : "";
     return '<div data-spot style="border:1px solid rgba(53,242,226,.22);background:rgba(4,26,24,.35);display:flex;flex-direction:column;overflow:hidden">' +
         '<div style="position:relative;aspect-ratio:3/2;background:radial-gradient(circle at 50% 45%, rgba(20,217,201,.12), #02100e 70%);border-bottom:1px solid rgba(53,242,226,.18)">' + thumb +
-          '<button data-act="libRemove" data-id="' + esc(e.id) + '" title="Remove from library" style="position:absolute;top:8px;right:8px;width:26px;height:26px;background:rgba(1,8,7,.7);border:1px solid rgba(255,84,104,.4);color:#FF8A99;font-size:13px;cursor:pointer;line-height:1">✕</button>' +
         '</div>' +
         '<div style="padding:14px 16px;display:flex;flex-direction:column;gap:10px">' +
-          '<div style="font-size:16px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(e.name || "Model") + '</div>' +
+          '<div style="font-size:16px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(e.title || "Model") + '</div>' +
           '<div style="font-family:\'IBM Plex Mono\',monospace;font-size:10px;letter-spacing:.08em;color:#57c9bf;display:flex;flex-wrap:wrap;gap:4px 12px">' +
-            '<span>' + fmtDate(e.date) + '</span>' + (e.faces != null ? '<span>' + num(e.faces) + ' faces</span>' : "") +
+            owner + '<span>' + when + '</span>' + (e.faces != null ? '<span>' + num(e.faces) + ' faces</span>' : "") +
           '</div>' +
           (wt ? '<div style="font-family:\'IBM Plex Mono\',monospace;font-size:10px;letter-spacing:.14em">' + wt + '</div>' : "") +
           '<div style="display:flex;gap:8px;margin-top:2px">' + stlBtn + glbBtn + '</div>' +
@@ -562,7 +604,7 @@
       '<div style="flex:1 1 380px;display:flex;flex-direction:column;gap:22px">' +
         '<div><div style="font-family:\'IBM Plex Mono\',monospace;font-size:11px;letter-spacing:.3em;color:#57c9bf;margin-bottom:8px">READY TO GENERATE</div><div style="font-size:24px;font-weight:600">Defaults are dialed in — just hit generate.</div></div>' +
         '<button data-act="generate" data-magnet class="h-primary" style="background:#35F2E2;color:#02201c;border:none;padding:20px 28px;font-size:18px;font-weight:700;letter-spacing:.12em;cursor:pointer;box-shadow:0 0 34px rgba(53,242,226,.45)">⬢ GENERATE 3D MODEL</button>' +
-        '<div style="font-family:\'IBM Plex Mono\',monospace;font-size:11px;letter-spacing:.1em;color:#3f7a73">TAKES A FEW MINUTES · ONE JOB AT A TIME ON THE LAB MACHINE</div>' +
+        '<div style="font-family:\'IBM Plex Mono\',monospace;font-size:11px;letter-spacing:.1em;color:#3f7a73">TYPICALLY ~' + jobTimeMins() + ' MIN · ONE JOB AT A TIME ON THE LAB MACHINE</div>' +
         studioAdvanced() +
       '</div>' +
     '</div>';
@@ -575,14 +617,22 @@
         '<label style="display:flex;flex-direction:column;gap:8px"><span style="font-family:\'IBM Plex Mono\',monospace;font-size:10px;letter-spacing:.22em;color:#57c9bf">RANDOM SEED</span>' +
           '<input class="field" type="text" data-model="seed" value="' + esc(state.seed) + '" placeholder="random" style="background:rgba(4,28,26,.85);border:1px solid rgba(53,242,226,.25);color:#EAFDFB;padding:10px 12px;font-family:\'IBM Plex Mono\',monospace;font-size:13px;outline:none;max-width:200px" /></label>' +
         '<label style="display:flex;flex-direction:column;gap:8px"><span style="font-family:\'IBM Plex Mono\',monospace;font-size:10px;letter-spacing:.22em;color:#57c9bf">MESH DETAIL — <span id="detail-label" style="color:#35F2E2">' + v.detailLabel + '</span> FACES</span>' +
-          '<input type="range" min="20000" max="200000" step="5000" value="' + state.detail + '" data-model="detail" style="accent-color:#35F2E2;width:100%" /></label>' +
+          '<input type="range" min="200000" max="2000000" step="50000" value="' + state.detail + '" data-model="detail" style="accent-color:#35F2E2;width:100%" /></label>' +
         '<label style="display:flex;flex-direction:column;gap:8px"><span style="font-family:\'IBM Plex Mono\',monospace;font-size:10px;letter-spacing:.22em;color:#57c9bf">PIPELINE QUALITY</span>' +
           '<select data-model="quality" style="background:rgba(4,28,26,.85);border:1px solid rgba(53,242,226,.25);color:#EAFDFB;padding:10px 12px;font-family:\'IBM Plex Mono\',monospace;font-size:13px;outline:none;max-width:240px">' +
             '<option value="draft"' + (state.quality === "draft" ? " selected" : "") + '>Draft — fastest</option>' +
             '<option value="standard"' + (state.quality === "standard" ? " selected" : "") + '>Standard — recommended</option>' +
             '<option value="high"' + (state.quality === "high" ? " selected" : "") + '>High — slowest, finest</option>' +
           '</select></label>' +
+        '<label style="display:flex;flex-direction:column;gap:8px"><span style="font-family:\'IBM Plex Mono\',monospace;font-size:10px;letter-spacing:.22em;color:#57c9bf">PRINT-PREP PIPELINE</span>' +
+          '<select data-model="printablePipeline" style="background:rgba(4,28,26,.85);border:1px solid rgba(53,242,226,.25);color:#EAFDFB;padding:10px 12px;font-family:\'IBM Plex Mono\',monospace;font-size:13px;outline:none;max-width:320px">' +
+            '<option value="v3"' + (state.printablePipeline === "v3" ? " selected" : "") + '>v3 — MeshLib (recommended)</option>' +
+            '<option value="v2"' + (state.printablePipeline === "v2" ? " selected" : "") + '>v2 — PyMeshLab + Manifold3D</option>' +
+            '<option value="v1"' + (state.printablePipeline === "v1" ? " selected" : "") + '>v1 — original (voxel fill)</option>' +
+          '</select>' +
+          '<span style="font-family:\'IBM Plex Mono\',monospace;font-size:10px;letter-spacing:.06em;color:#3f7a73">v3 is ~2x faster, files 4-7x smaller, and watertight. v1 is the original behaviour.</span></label>' +
         '<label style="display:flex;align-items:center;gap:12px;cursor:pointer"><input type="checkbox" data-model="skipPrep"' + (state.skipPrep ? " checked" : "") + ' style="accent-color:#35F2E2;width:16px;height:16px" /><span style="font-family:\'IBM Plex Mono\',monospace;font-size:11px;letter-spacing:.12em;color:#a8ded7">SKIP PRINT-PREP <span style="color:#3f7a73">(raw geometry only — not watertight)</span></span></label>' +
+        '<label style="display:flex;align-items:center;gap:12px;cursor:pointer"><input type="checkbox" data-model="skipTexture"' + (state.skipTexture ? " checked" : "") + ' style="accent-color:#35F2E2;width:16px;height:16px" /><span style="font-family:\'IBM Plex Mono\',monospace;font-size:11px;letter-spacing:.12em;color:#a8ded7">⚡ SKIP TEXTURE <span style="color:#3f7a73">(faster — geometry only, same mesh)</span></span></label>' +
       '</div>'
     ) : "";
     return '<div style="border:1px solid rgba(53,242,226,.2)">' +
@@ -637,7 +687,10 @@
         '<div><div style="font-family:\'IBM Plex Mono\',monospace;font-size:11px;letter-spacing:.3em;color:#57c9bf;margin-bottom:8px">JOB ' + esc(state.jobId) + ' · RUNNING ON LAB MACHINE</div><div style="font-size:clamp(24px,3vw,30px);font-weight:600">Solidifying your photo…</div>' +
           '<div id="fun-word" style="font-family:\'IBM Plex Mono\',monospace;font-size:13px;letter-spacing:.16em;color:#35F2E2;margin-top:10px">' + funWordHTML() + '</div></div>' +
         '<div style="flex:1"></div>' +
-        '<div style="font-size:clamp(44px,6vw,64px);font-weight:700;color:#35F2E2;text-shadow:0 0 28px rgba(53,242,226,.5);line-height:1"><span id="prog-int">' + v.progInt + '</span><span style="font-size:.5em">%</span></div>' +
+        '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">' +
+          '<div style="font-size:clamp(44px,6vw,64px);font-weight:700;color:#35F2E2;text-shadow:0 0 28px rgba(53,242,226,.5);line-height:1"><span id="prog-int">' + v.progInt + '</span><span style="font-size:.5em">%</span></div>' +
+          '<div style="font-family:\'IBM Plex Mono\',monospace;font-size:13px;letter-spacing:.2em;color:#57c9bf">⏱ ELAPSED <span id="elapsed" style="color:#EAFDFB">' + fmtDuration(currentElapsed()) + '</span></div>' +
+        '</div>' +
       '</div>' +
       '<div id="stage-row" style="display:flex;flex-wrap:wrap;gap:10px">' + stageChips(v) + '</div>' +
       '<div style="height:10px;border:1px solid rgba(53,242,226,.35);overflow:hidden;background:rgba(4,28,26,.6)"><div id="bar-fill" style="' + v.barFill + '"></div></div>' +
@@ -712,6 +765,7 @@
     var sr = appEl.querySelector("#stage-row"); if (sr) sr.innerHTML = stageChips(v);
     var lf = appEl.querySelector("#log-feed"); if (lf) lf.innerHTML = logLinesHTML();
     var mp = appEl.querySelector("[data-mp]"); if (mp) mp.setAttribute("progress", v.progInt);
+    patchElapsed();
   }
 
   // =========================================================================
@@ -720,18 +774,24 @@
   function go(screen) { state.screen = screen; render(); }
 
   async function doLogin() {
-    var id = state.authName.trim(), key = state.authKey.trim();
+    // Don't trim the access key: passwords may legitimately contain spaces.
+    var id = state.authName.trim(), key = state.authKey;
     if (!id || !key) { state.authError = true; render(); return; }
     if (DEMO) {
       if (key.toLowerCase() === "wrong") { state.authError = true; render(); return; }
       state.authError = false; state.screen = "home"; render(); startHealthPoll(); return;
     }
-    // Attach the credential optimistically so the probe (and everything after)
-    // goes through the same api()/authHeaders path; clear it again on a 401.
-    AUTH = "Basic " + btoa(id + ":" + key);
     try {
-      var r = await api("/api/health");
-      if (r.status === 401) { AUTH = null; state.authError = true; render(); return; }
+      // Exchange the credentials for a signed session token, then use that
+      // (as a Bearer) for every subsequent call. Storing it lets the operator
+      // stay signed in across page refreshes.
+      var basic = "Basic " + b64utf8(id + ":" + key);
+      var r = await fetch("/api/login", { method: "POST", headers: { Authorization: basic } });
+      if (!r.ok) { AUTH = null; state.authError = true; render(); return; }
+      var data = await r.json();
+      AUTH = "Bearer " + data.token;
+      try { localStorage.setItem(LS_TOKEN, data.token); } catch (e) {}
+      if (data.username) state.authName = data.username;
       state.authError = false; state.screen = "home";
       await loadConfig();
       render();
@@ -749,13 +809,15 @@
       log: [], prog: 0, stageIdx: -1, errMsg: "", errHint: "", busyReason: "", jobId: "",
       previewSrc: null, previewPath: null, libDraft: null,
       dlSTL: null, dlSTLName: "", dlGLB: null, dlGLBName: "",
+      jobElapsed: null, _elapsedAnchor: 0,
     });
   }
 
   function logout() {
     resetJob(); stopHealthPoll();
     AUTH = null;
-    Object.assign(state, { screen: "login", authKey: "", authError: false, phase: "idle", photoSrc: null, photoFile: null });
+    try { localStorage.removeItem(LS_TOKEN); } catch (e) {}
+    Object.assign(state, { screen: "login", authKey: "", authError: false, phase: "idle", photoSrc: null, photoFile: null, libraryItems: null });
     render();
   }
 
@@ -784,6 +846,8 @@
     fd.append("target_faces", String(state.detail));
     fd.append("pipeline_type", qualityToPipeline(state.quality));
     fd.append("skip_printable", state.skipPrep ? "1" : "0");
+    fd.append("skip_texture", state.skipTexture ? "1" : "0");
+    fd.append("printable_pipeline", state.printablePipeline);
     try {
       var r = await api("/api/jobs", { method: "POST", body: fd });
       if (r.status === 429) {
@@ -837,11 +901,34 @@
       '<span style="animation:blinkc 1s step-end infinite">…</span>';
   }
   function patchFun() { var el = appEl.querySelector("#fun-word"); if (el) el.innerHTML = funWordHTML(); }
+
+  // Live elapsed-time readout on the generating screen. jobElapsed is anchored to
+  // the server's reported elapsed on every poll; between polls we tick it forward
+  // locally so the timer counts up smoothly every second.
+  function nowMs() { return (window.performance && performance.now) ? performance.now() : Date.now(); }
+  function currentElapsed() {
+    if (state.jobElapsed == null) return 0;
+    var delta = state._elapsedAnchor ? (nowMs() - state._elapsedAnchor) / 1000 : 0;
+    return state.jobElapsed + delta;
+  }
+  function fmtDuration(sec) {
+    sec = Math.max(0, Math.floor(sec || 0));
+    var m = Math.floor(sec / 60), s = sec % 60;
+    return m + ":" + (s < 10 ? "0" : "") + s;
+  }
+  function patchElapsed() { var el = appEl.querySelector("#elapsed"); if (el) el.textContent = fmtDuration(currentElapsed()); }
+
   function startFun() {
     if (state._fun) return;
     state.funIdx = 0; // begin each run at the first word ("Cooking")
-    patchFun();
-    state._fun = setInterval(function () { state.funIdx++; patchFun(); }, 2200);
+    patchFun(); patchElapsed();
+    var ticks = 0;
+    // 1s cadence: refresh the timer every second, rotate the playful word every ~2s.
+    state._fun = setInterval(function () {
+      ticks++;
+      patchElapsed();
+      if (ticks % 2 === 0) { state.funIdx++; patchFun(); }
+    }, 1000);
   }
   function stopFun() { if (state._fun) { clearInterval(state._fun); state._fun = null; } }
 
@@ -935,6 +1022,9 @@
     if (idx !== state.stageIdx) pushLog(stageLog(st));
     state.stageIdx = idx;
     state.prog = progFor(idx, job.elapsed_seconds || 0);
+    // Anchor the live timer to the server's authoritative elapsed each poll.
+    state.jobElapsed = job.elapsed_seconds || 0;
+    state._elapsedAnchor = nowMs();
     if (!wasRunning) render(); else patchRunning();
   }
 
@@ -993,7 +1083,11 @@
     var ok = await mp.whenLoaded(timeoutMs || 7000);
     if (!ok) return;
     await new Promise(function (r) { setTimeout(r, 450); });
-    addToLibrary(Object.assign({ thumb: mp.snapshot ? mp.snapshot(360) : null }, draft));
+    // The model row already exists (the worker wrote it on completion); we just
+    // attach the browser-rendered 3D snapshot. Force the Library to refetch so a
+    // freshly-finished model shows up if the operator opens that tab.
+    var thumb = mp.snapshot ? mp.snapshot(360) : null;
+    if (thumb) { saveThumb(draft.id, thumb); state.libraryItems = null; }
   }
 
   // Fetch the result GLB with auth, then point the live orbit viewer at the blob.
@@ -1018,6 +1112,7 @@
   function simGenerate() {
     stopPolling(); stopSim();
     state.jobId = "DEMO"; state.log = []; state.prog = 0; state.stageIdx = 0; state.errMsg = ""; state.errHint = "";
+    state.jobElapsed = 0; state._elapsedAnchor = nowMs(); // start the live timer at 0:00
     state.phase = "running"; pushLog("> job DEMO accepted · tunnel secure"); render();
     var t0 = Date.now(); var lastStage = -1; var TOTAL = 12;
     var stageOrder = ["queued", "preprocessing", "generating", "making_printable"];
@@ -1057,7 +1152,7 @@
     browse: function () { var fi = appEl.querySelector("#file-input"); if (fi) fi.click(); },
     clearPhoto: clearPhoto,
     toggleAdv: function () { state.advOpen = !state.advOpen; render(); },
-    gotoLibrary: function () { go("library"); },
+    gotoLibrary: function () { state.libraryItems = null; go("library"); }, // refetch the shared archive
     generate: generate,
     retry: retry,
     startOver: startOver,
@@ -1065,7 +1160,6 @@
     downloadSTL: function (e, el) { downloadResult("STL", el); },
     downloadGLB: function (e, el) { downloadResult("GLB", el); },
     dl: function (e, el) { downloadFile(el.dataset.path, el.dataset.name, el); },
-    libRemove: function (e, el) { removeFromLibrary(el.dataset.id); render(); },
   };
 
   appEl.addEventListener("click", function (e) {
@@ -1093,6 +1187,8 @@
       var lbl = appEl.querySelector("#detail-label"); if (lbl) lbl.textContent = num(state.detail);
     } else if (key === "skipPrep") {
       state.skipPrep = el.checked;
+    } else if (key === "skipTexture") {
+      state.skipTexture = el.checked;
     } else {
       state[key] = el.value; // authName / authKey / seed / quality — no re-render (preserve focus/caret)
     }
@@ -1170,11 +1266,21 @@
   async function boot() {
     initScroll();
     if (!DEMO) {
-      // Load config early. If the API answers (no-auth mode, or already authed),
-      // we can safely restore an in-flight job. A 401 means auth is on and we're
-      // not signed in yet — just show the login screen.
+      // "Stay signed in": if we have a saved session token, attach it before the
+      // first API call so an already-authenticated operator skips the login page.
+      var token = null;
+      try { token = localStorage.getItem(LS_TOKEN); } catch (e) {}
+      if (token) AUTH = "Bearer " + token;
+
+      // Load config early. If the API answers (bootstrap-open mode, or a valid
+      // token) we can restore an in-flight job. A 401 means auth is on and the
+      // token is missing/expired — drop it and fall through to the login screen.
       var ready = await loadConfig();
-      if (ready) startHealthPoll(); // API reachable (auth off, or none) → keep queue live
+      if (!ready && AUTH) {
+        AUTH = null;
+        try { localStorage.removeItem(LS_TOKEN); } catch (e) {}
+      }
+      if (ready) startHealthPoll(); // API reachable (bootstrap-open, or authed) → keep queue live
       var saved = ready && localStorage.getItem(LS_KEY);
       if (saved) {
         // Restore an in-flight job: jump straight into the studio and resume polling.
@@ -1182,6 +1288,11 @@
         render(); startPolling(saved);
         return;
       }
+      // No-auth mode: /api/config answered without any credentials, so there is
+      // no operator gate to pass -- skip the login screen and land on Home.
+      // When auth IS enabled, loadConfig() gets a 401, `ready` is false, and we
+      // correctly fall through to the login screen below.
+      if (ready) state.screen = "home";
     }
     render();
   }

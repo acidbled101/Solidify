@@ -38,12 +38,18 @@ def main():
         help="Override sampler steps for all three flow phases (default: pipeline JSON, usually 12)",
     )
     parser.add_argument(
-        "--target-faces", type=int, default=500000,
-        help="Pre-bake simplification target face count (default: 500000)",
+        "--target-faces", type=int, default=1000000,
+        help="Pre-bake simplification target face count (default: 1000000)",
     )
     parser.add_argument(
         "--model-id", default="microsoft/TRELLIS.2-4B",
         help="HuggingFace model id to load (default: microsoft/TRELLIS.2-4B)",
+    )
+    parser.add_argument(
+        "--skip-texture", action="store_true",
+        help="Skip texture-SLat inference entirely (geometry only). Much faster; "
+             "implies --no-texture. Geometry is identical to a full run at the "
+             "same seed.",
     )
     args = parser.parse_args()
 
@@ -79,6 +85,7 @@ def main():
             target_faces=args.target_faces,
             texture_size=args.texture_size,
             no_texture=args.no_texture,
+            skip_texture=args.skip_texture,
             out_glb_path=glb_path,
             out_obj_path=obj_path,
         )

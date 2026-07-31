@@ -76,6 +76,91 @@ class GenerationResult:
     used_metal_bake: bool
 
 
+def _free_memory():
+    """Compact the MPS allocator pool + run GC. The 1024 shape decode peaks right
+    at the 32 GB memory ceiling on this Mac (it spills into swap), so reclaiming
+    what we can just before it matters."""
+    import gc
+
+    gc.collect()
+    try:
+        torch.mps.empty_cache()
+    except Exception:
+        pass
+
+
+@torch.no_grad()
+def _run_geometry_only(pipeline, image, *, seed, pipeline_type, sampler_params):
+    """Shape-only inference: mirror Trellis2ImageTo3DPipeline.run() but skip the
+    texture-SLat sampling and texture decode.
+
+    NOTE: the @torch.no_grad() decorator is load-bearing -- the vendored run()
+    has it, and without it every tensor here carries an autograd graph, which
+    both breaks the downstream `.cpu().numpy()` (tensor requires grad) and roughly
+    doubles decoder memory (a real 1024 OOM was traced to exactly this).
+
+    The mesh is produced entirely from the shape latent (`decode_shape_slat`);
+    the texture latent only adds surface colour, which we discard under
+    `no_texture` anyway. Because we replay exactly the same RNG sequence with the
+    same seed (preprocess -> manual_seed -> get_cond -> sparse structure -> shape
+    SLat), the shape latent -- and therefore the geometry -- is identical to a
+    full run(); we simply never spend the texture diffusion phase.
+
+    This lives here (our tracked code), not in the vendored, git-ignored
+    TRELLIS.2 tree, and calls the pipeline's own methods so it stays in step with
+    whatever model is installed. It intentionally mirrors run()'s branching; if
+    upstream run() changes materially, revisit this.
+    """
+    ss_res = {"512": 32, "1024": 64, "1024_cascade": 32, "1536_cascade": 32}
+    if pipeline_type not in ss_res:
+        raise ValueError(f"Invalid pipeline type: {pipeline_type}")
+
+    img = pipeline.preprocess_image(image)
+    torch.manual_seed(seed)
+    cond_512 = pipeline.get_cond([img], 512)
+    cond_1024 = pipeline.get_cond([img], 1024) if pipeline_type != "512" else None
+
+    coords = pipeline.sample_sparse_structure(cond_512, ss_res[pipeline_type], 1, sampler_params)
+
+    models = pipeline.models
+    if pipeline_type == "512":
+        shape_slat = pipeline.sample_shape_slat(
+            cond_512, models["shape_slat_flow_model_512"], coords, sampler_params
+        )
+        res = 512
+    elif pipeline_type == "1024":
+        shape_slat = pipeline.sample_shape_slat(
+            cond_1024, models["shape_slat_flow_model_1024"], coords, sampler_params
+        )
+        res = 1024
+    elif pipeline_type == "1024_cascade":
+        shape_slat, res = pipeline.sample_shape_slat_cascade(
+            cond_512, cond_1024,
+            models["shape_slat_flow_model_512"], models["shape_slat_flow_model_1024"],
+            512, 1024, coords, sampler_params,
+        )
+    else:  # 1536_cascade
+        shape_slat, res = pipeline.sample_shape_slat_cascade(
+            cond_512, cond_1024,
+            models["shape_slat_flow_model_512"], models["shape_slat_flow_model_1024"],
+            512, 1536, coords, sampler_params,
+        )
+
+    # The 1024 shape decode is the memory peak on a 32 GB Mac (it spills into
+    # swap and sits right at the MPS watermark -- a real OOM was seen here, 74 MiB
+    # short of the limit). Drop the conditioning + coords we no longer need and
+    # compact the pool before decoding, giving it headroom the monolithic run()
+    # never reclaims.
+    del cond_512, cond_1024, coords
+    _free_memory()
+
+    meshes, _subs = pipeline.decode_shape_slat(shape_slat, res)
+    mesh = meshes[0]
+    mesh.fill_holes()  # same hole-fill run()'s decode_latent applies
+    _free_memory()
+    return mesh
+
+
 def run_generation(
     pipeline,
     image: PILImage.Image,
@@ -83,37 +168,53 @@ def run_generation(
     seed: int = 42,
     pipeline_type: str = "1024_cascade",
     steps: Optional[int] = None,
-    target_faces: int = 500000,
+    target_faces: int = 1000000,
     texture_size: int = 2048,
     no_texture: bool = False,
+    skip_texture: bool = False,
     out_glb_path: str,
     out_obj_path: str,
 ) -> GenerationResult:
     """Run TRELLIS.2 generation + (optional) texture bake, writing GLB/OBJ.
 
+    `skip_texture` skips the texture-SLat *inference* entirely (see
+    `_run_geometry_only`): a full ~1.3B-param diffusion phase plus texture decode
+    that produce colour we discard whenever `no_texture` is set. The mesh comes
+    from the shape latent alone, so geometry is unchanged; only the wasted work
+    goes away. Skipping texture inference means there is nothing to bake, so it
+    implies `no_texture`.
+
     Raises WatchdogError if the output looks corrupted by the known macOS
     GPU-watchdog bug (see watchdog_help_message()).
     """
+    if skip_texture:
+        no_texture = True  # no texture was inferred, so there's nothing to bake
+
     sampler_overrides = {"steps": steps} if steps else {}
 
     t0 = time.time()
     try:
-        outputs = pipeline.run(
-            image,
-            seed=seed,
-            pipeline_type=pipeline_type,
-            sparse_structure_sampler_params=sampler_overrides,
-            shape_slat_sampler_params=sampler_overrides,
-            tex_slat_sampler_params=sampler_overrides,
-        )
+        if skip_texture:
+            mesh_out = _run_geometry_only(
+                pipeline, image, seed=seed, pipeline_type=pipeline_type,
+                sampler_params=sampler_overrides,
+            )
+        else:
+            outputs = pipeline.run(
+                image,
+                seed=seed,
+                pipeline_type=pipeline_type,
+                sparse_structure_sampler_params=sampler_overrides,
+                shape_slat_sampler_params=sampler_overrides,
+                tex_slat_sampler_params=sampler_overrides,
+            )
+            mesh_out = outputs[0] if isinstance(outputs, list) else outputs
     except (IndexError, AssertionError) as e:
         msg = str(e)
         if any(sig in msg for sig in _WATCHDOG_SIGNATURES):
             raise WatchdogError(watchdog_help_message(), raw_message=msg) from e
         raise
     t_gen = time.time() - t0
-
-    mesh_out = outputs[0] if isinstance(outputs, list) else outputs
 
     verts = mesh_out.vertices.cpu().numpy()
     faces = mesh_out.faces.cpu().numpy()
@@ -229,8 +330,29 @@ def run_generation(
             export_glb_with_texture(new_verts, new_faces, uvs, base_color_img, mr_img, out_glb_path)
     else:
         import trimesh
-        tm = trimesh.Trimesh(vertices=verts, faces=faces)
+
+        # Apply the same target_faces cap the textured path already applies
+        # (fast_simplification, see the branch above) -- without it, a complex
+        # input photo can decode to a multi-million-face raw mesh that's both
+        # slow to export and, worse, slow for the downstream make_printable
+        # stage to repair/voxelize. Tested against a real 7.4M-face job output:
+        # capping first cut that stage from 746s to 68s with no measurable
+        # quality loss (near-identical Chamfer/Hausdorff fidelity), since
+        # make_printable's own voxel remesh + resimplify is what determines
+        # final quality either way.
+        out_verts, out_faces = verts, faces
+        tf = min(target_faces, len(faces))
+        if len(faces) > tf:
+            try:
+                import fast_simplification
+                ratio = 1.0 - (tf / len(faces))
+                out_verts, out_faces = fast_simplification.simplify(verts, faces, ratio)
+            except ImportError:
+                pass
+
+        tm = trimesh.Trimesh(vertices=out_verts, faces=out_faces)
         tm.export(out_glb_path)
+        verts, faces = out_verts, out_faces  # keep OBJ export + result stats in sync
 
     t_bake = time.time() - t_bake0
 

@@ -19,3 +19,12 @@ output_3d*.png
 
 # Home hero 3D asset (intentional UI asset, NOT generated job output)
 !server/static/assets/specimen-042.stl
+
+# Local SQLite DB (operator password hashes + model archive) -- never commit.
+trellis.db
+trellis.db-wal
+trellis.db-shm
+*.db
+*.db-wal
+*.db-shm
+server.log

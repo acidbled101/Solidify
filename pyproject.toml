@@ -26,5 +26,15 @@ dependencies = [
     "python-multipart",
 ]
 
+[project.optional-dependencies]
+# v2 print-prep pipeline (trellis_core/printable_v2.py + compare_printable.py).
+# Not required by the default v1 pipeline, so it stays out of the base install:
+#   pip install -e ".[postproc-v2]"
+postproc-v2 = [
+    "pymeshlab",
+    "manifold3d",
+    "meshlib",
+]
+
 [project.scripts]
 trellis-generate = "generate:main"
