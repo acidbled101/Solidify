@@ -216,6 +216,14 @@ class DPOBranchConfig:
                          select_branch_windows() for how forks are kept
                          non-overlapping when the schedule is too short to fit
                          all of them.
+    grad_checkpointing:  trade compute for memory during the differentiable
+                         steering segment by recomputing each transformer
+                         block's forward in the backward pass instead of
+                         retaining its activations. ON by default and should
+                         stay on: without it that segment retains ~38GB of
+                         activations and reliably OOMs on a 36GB MPS ceiling
+                         (see checkpointed_blocks' docstring for the measured
+                         numbers). Numerically identical either way.
     """
 
     t_branch: float = 0.5
@@ -231,6 +239,7 @@ class DPOBranchConfig:
     verbose: bool = True
     seed: Optional[int] = None
     num_branches: int = 1
+    grad_checkpointing: bool = True
 
     # The plan pins the branch point to this window; see Section III, Phase 2.
     T_BRANCH_MIN: float = 0.3
@@ -441,6 +450,68 @@ def frozen_parameters(model):
     finally:
         for p, flag in saved:
             p.requires_grad_(flag)
+
+
+@contextlib.contextmanager
+def checkpointed_blocks(model, enabled: bool = True):
+    """Temporarily turn on gradient checkpointing for every submodule of
+    `model` that supports it, restoring the original flags on exit.
+
+    THIS IS WHAT MAKES THE DIFFERENTIABLE SEGMENT FIT IN MEMORY. Measured on
+    the real shape-SLat flow model (SLatFlowModel: 30 blocks, model_channels
+    1536, mlp_ratio 5.33 -> 8192-wide MLP, bfloat16) at 2858 occupied voxels:
+
+      * activations retained by ONE graph-building forward   ~9.5 GB
+      * forwards per steer_delta gradient step: continuation_steps (2)
+        x 2 for classifier-free guidance's neg+pos passes     = 4
+      * total retained                                        ~38 GB
+
+    against PyTorch's own MPS ceiling of ~36.3 GiB -- which is exactly the
+    "MPS backend out of memory (MPS allocated: 36.17 GiB ... tried to
+    allocate 373.91 MiB)" failure observed on hardware, every time, inside
+    the FIRST gradient step, at
+    modules/sparse/attention/full_attn.py's sdpa call.
+
+    trellis2's blocks already implement the fix -- ModulatedSparseTransformer
+    CrossBlock.forward (modules/sparse/transformer/modulated.py) dispatches to
+    torch.utils.checkpoint.checkpoint(..., use_reentrant=False) when
+    self.use_checkpoint is set. It just defaults to False, and the pretrained
+    pipeline.json never turns it on (nothing upstream backprops through this
+    model at inference). Flipping it drops the retained set to roughly one
+    block-input tensor per block (~264 MB per forward, ~1 GB total), at the
+    cost of recomputing each block's forward during backward.
+
+    Numerically this changes nothing -- checkpointing recomputes exactly the
+    same forward -- so it is safe to leave scoped tightly around the one call
+    that runs .backward(), which is what the caller does.
+
+    Applied by walking submodules and flipping any `use_checkpoint` attribute
+    rather than hardcoding block types: SLatFlowModel builds self.blocks from
+    a config, and the attribute is read per-forward (not baked in at
+    construction), so a runtime flip is honoured immediately.
+    """
+    if not enabled:
+        yield
+        return
+    flipped = []
+    try:
+        for module in model.modules():
+            if getattr(module, "use_checkpoint", None) is False:
+                module.use_checkpoint = True
+                flipped.append(module)
+        if not flipped:
+            # Not fatal (the segment may still fit for a small enough voxel
+            # count), but it is the difference between ~1 GB and ~38 GB of
+            # retained activations -- never let that pass silently.
+            print(
+                "[dpo_branch] warning: no submodule exposed a use_checkpoint flag; "
+                "gradient checkpointing is NOT active and the differentiable segment "
+                "may exhaust unified memory."
+            )
+        yield
+    finally:
+        for module in flipped:
+            module.use_checkpoint = False
 
 
 def _release_mps_cache() -> None:
@@ -1266,7 +1337,11 @@ def sample_shape_slat_with_dpo_branch(
                 # enable_grad=False / no_grad, so forcing the slower conv
                 # backend for them would cost real decode time for zero benefit.
                 backend_ctx = sparse_conv_backend("none") if cfg.force_conv_none else contextlib.nullcontext()
-                with backend_ctx:
+                # checkpointed_blocks is scoped to exactly the same region and
+                # for the same reason: this is the only call that builds an
+                # autograd graph through the flow model, and without
+                # checkpointing that graph alone is ~38GB (see its docstring).
+                with backend_ctx, checkpointed_blocks(flow_model, cfg.grad_checkpointing):
                     loss_history, proxy_history, rms_history = steer_delta(
                         delta,
                         lambda d: _proxy(_continue(d)[1]),

@@ -469,6 +469,104 @@ def test_backfill_sampler_defaults():
     print("  backfill_sampler_defaults: fills missing guidance defaults, never overrides supplied values")
 
 
+def test_checkpointed_blocks_flips_and_restores():
+    """The context manager must flip every use_checkpoint flag it finds and
+    put them all back, even if the body raises."""
+    class Leaf(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.use_checkpoint = False
+
+    class Root(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.a, self.b = Leaf(), Leaf()
+            self.plain = nn.Linear(2, 2)  # no use_checkpoint attr -- must be left alone
+
+    m = Root()
+    with dpo_branch.checkpointed_blocks(m):
+        assert m.a.use_checkpoint is True and m.b.use_checkpoint is True
+    assert m.a.use_checkpoint is False and m.b.use_checkpoint is False
+
+    # restored even on an exception
+    try:
+        with dpo_branch.checkpointed_blocks(m):
+            raise RuntimeError("boom")
+    except RuntimeError:
+        pass
+    assert m.a.use_checkpoint is False and m.b.use_checkpoint is False
+
+    # enabled=False is a clean no-op
+    with dpo_branch.checkpointed_blocks(m, enabled=False):
+        assert m.a.use_checkpoint is False
+    print("  checkpointed_blocks: flips every use_checkpoint flag, restores them (even on exception)")
+
+
+def test_checkpointing_preserves_gradient_through_sparsetensor():
+    """THE load-bearing property: gradient checkpointing must not break the
+    autograd chain back to `delta` when the checkpointed function's input is
+    a SparseTensor (a custom Python object, NOT a Tensor).
+
+    This is the fix that makes the differentiable steering segment fit in
+    memory at all (~38GB -> ~1GB of retained activations, see
+    checkpointed_blocks' docstring), so "does it still actually compute the
+    right gradient" is not something to take on faith -- torch.utils.
+    checkpoint's handling of non-Tensor inputs is exactly the kind of thing
+    that could silently zero the gradient instead of erroring.
+
+    Uses a REAL trellis2 ModulatedSparseTransformerCrossBlock on a REAL
+    SparseTensor (CPU, random init -- no weights or MPS needed), because the
+    whole question is about that specific interaction.
+    """
+    try:
+        from trellis2.modules.sparse import SparseTensor
+        from trellis2.modules.sparse.transformer.modulated import ModulatedSparseTransformerCrossBlock
+    except Exception as e:
+        print(f"  SKIPPED (trellis2 not importable here: {type(e).__name__})")
+        return
+
+    C, CTX = 64, 32
+    torch.manual_seed(0)
+    raw = torch.stack([
+        torch.zeros(64, dtype=torch.int32),
+        torch.randint(0, 8, (64,), dtype=torch.int32),
+        torch.randint(0, 8, (64,), dtype=torch.int32),
+        torch.randint(0, 8, (64,), dtype=torch.int32),
+    ], dim=1)
+    seen = {}
+    for i, c in enumerate(raw.tolist()):
+        seen[tuple(c)] = i
+    coords = raw[sorted(seen.values())]
+    n = coords.shape[0]
+    base, mod, ctx = torch.randn(n, C), torch.randn(1, 6 * C), torch.randn(1, 4, CTX)
+
+    def run(use_ckpt):
+        torch.manual_seed(1)  # identical weights both ways
+        block = ModulatedSparseTransformerCrossBlock(
+            channels=C, ctx_channels=CTX, num_heads=4, mlp_ratio=2.0,
+            use_checkpoint=use_ckpt, share_mod=True,
+        ).float()
+        for p in block.parameters():
+            p.requires_grad_(False)
+        delta = (torch.randn(n, C) * 0.02).requires_grad_(True)
+        with torch.enable_grad():
+            out = block(SparseTensor(feats=base + delta, coords=coords), mod, ctx)
+            loss = (out.feats ** 2).sum()
+        loss.backward()
+        return float(loss.detach()), delta.grad.clone()
+
+    loss_off, grad_off = run(False)
+    loss_on, grad_on = run(True)
+
+    assert grad_on is not None and float(grad_on.abs().sum()) > 0, \
+        "checkpointing silently killed the gradient to delta"
+    assert math.isclose(loss_off, loss_on, rel_tol=1e-5), (loss_off, loss_on)
+    maxdiff = float((grad_off - grad_on).abs().max())
+    assert maxdiff < 1e-4, f"gradients diverged under checkpointing: max|diff|={maxdiff}"
+    print(f"  gradient checkpointing: gradient to delta preserved through SparseTensor "
+          f"(max|diff|={maxdiff:.1e}, loss identical)")
+
+
 def test_rank_degradation():
     """_rank() must degrade gracefully -- and _rank's return value, not some
     other signal, is what a caller should use to decide which branch to fall
@@ -533,6 +631,8 @@ TESTS = [
     test_select_branch_windows_multi,
     test_backfill_sampler_defaults,
     test_rank_degradation,
+    test_checkpointed_blocks_flips_and_restores,
+    test_checkpointing_preserves_gradient_through_sparsetensor,
     test_config_clamps,
     test_sparse_conv_backend_restores_env,
     test_gradients_reach_delta_only,
