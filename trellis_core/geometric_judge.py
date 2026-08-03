@@ -46,27 +46,25 @@ import numpy as np
 import trimesh
 
 
-def detail_reward(mesh: trimesh.Trimesh) -> float:
-    """R_Detail: discrete Laplace-Beltrami surface energy, sum_v ||Δx_v||^2.
+@dataclass(frozen=True)
+class _DetailRewardArrays:
+    laplacian_mag: np.ndarray  # per-vertex ||Δx_v||^2, length == len(mesh.vertices)
+    vertex_degree: np.ndarray  # per-vertex neighbor count, same length
 
-    Uses the uniform (umbrella) graph Laplacian -- Δx_v = x_v - mean(neighbors)
-    -- rather than a cotangent Laplacian, since cotangent weights need
-    consistent per-triangle angles that a mid-generation candidate mesh
-    (possibly non-manifold, self-intersecting) isn't guaranteed to have.
-    Vectorized via plain numpy (bincount + add.at); do not replace with a
-    per-vertex Python loop, it's too slow for real mesh sizes, and avoid
-    reintroducing a scipy sparse matrix here -- it was measured to allocate
-    ~100MB transiently per call at 400K vertices, which matters given the
-    plan's #1 flagged risk is unified-memory pressure during branching.
-    """
+
+def _detail_reward_arrays(mesh: trimesh.Trimesh) -> _DetailRewardArrays:
+    """The actual R_Detail computation. detail_reward() below is a one-line
+    wrapper that sums laplacian_mag -- kept as a separate function so the
+    per-vertex arrays are available to callers that want them (e.g. for a
+    detail-energy heatmap) without a second pass over the mesh."""
     verts = mesh.vertices
     n = len(verts)
     if n == 0:
-        return 0.0
+        return _DetailRewardArrays(np.zeros(0), np.zeros(0))
 
     edges = mesh.edges_unique
     if len(edges) == 0:
-        return 0.0
+        return _DetailRewardArrays(np.zeros(n), np.zeros(n))
     i, j = edges[:, 0], edges[:, 1]
     rows = np.concatenate([i, j])
     cols = np.concatenate([j, i])
@@ -82,7 +80,40 @@ def detail_reward(mesh: trimesh.Trimesh) -> float:
     laplacian = verts - neighbor_mean
     laplacian[~has_neighbors] = 0.0
 
-    return float(np.einsum("ij,ij->i", laplacian, laplacian).sum())
+    return _DetailRewardArrays(
+        laplacian_mag=np.einsum("ij,ij->i", laplacian, laplacian),
+        vertex_degree=degree,
+    )
+
+
+def detail_reward(mesh: trimesh.Trimesh) -> float:
+    """R_Detail: discrete Laplace-Beltrami surface energy, sum_v ||Δx_v||^2.
+
+    Uses the uniform (umbrella) graph Laplacian -- Δx_v = x_v - mean(neighbors)
+    -- rather than a cotangent Laplacian, since cotangent weights need
+    consistent per-triangle angles that a mid-generation candidate mesh
+    (possibly non-manifold, self-intersecting) isn't guaranteed to have.
+    Vectorized via plain numpy (bincount + add.at); do not replace with a
+    per-vertex Python loop, it's too slow for real mesh sizes, and avoid
+    reintroducing a scipy sparse matrix here -- it was measured to allocate
+    ~100MB transiently per call at 400K vertices, which matters given the
+    plan's #1 flagged risk is unified-memory pressure during branching.
+    """
+    return float(_detail_reward_arrays(mesh).laplacian_mag.sum())
+
+
+@dataclass(frozen=True)
+class _OverhangArrays:
+    overhang_cos: np.ndarray  # per-face n_i . g  (g = (0,0,-1)); 1.0 = straight down
+    face_areas: np.ndarray    # per-face area, same indexing as overhang_cos
+
+
+def _overhang_arrays(mesh: trimesh.Trimesh) -> _OverhangArrays:
+    if len(mesh.faces) == 0:
+        return _OverhangArrays(np.zeros(0), np.zeros(0))
+    normal_z = mesh.face_normals[:, 2]
+    n_dot_g = -normal_z  # g = (0, 0, -1)
+    return _OverhangArrays(overhang_cos=n_dot_g, face_areas=mesh.area_faces)
 
 
 def overhang_penalty(mesh: trimesh.Trimesh, theta_crit_deg: float = 45.0) -> float:
@@ -95,19 +126,66 @@ def overhang_penalty(mesh: trimesh.Trimesh, theta_crit_deg: float = 45.0) -> flo
     (normal_z < -cos(overhang_angle) there is the binary-mask version of the
     same n . g > cos(theta_crit) condition used here).
     """
-    if len(mesh.faces) == 0:
+    arrays = _overhang_arrays(mesh)
+    if len(arrays.overhang_cos) == 0:
         return 0.0
-    normal_z = mesh.face_normals[:, 2]
-    n_dot_g = -normal_z  # g = (0, 0, -1)
     cos_crit = math.cos(math.radians(theta_crit_deg))
-    excess = np.maximum(0.0, n_dot_g - cos_crit)
-    return float(np.sum(mesh.area_faces * excess))
+    excess = np.maximum(0.0, arrays.overhang_cos - cos_crit)
+    return float(np.sum(arrays.face_areas * excess))
 
 
 @dataclass(frozen=True)
 class ThicknessResult:
     penalty: float
     valid: bool  # False if ray sampling failed / every ray missed -- penalty is 0.0 by construction, not because the mesh is fine
+
+
+@dataclass(frozen=True)
+class _ThicknessArrays:
+    wall_depths: np.ndarray  # first-hit ray distance, successful rays only (world units, not d_min-normalized)
+    rays_requested: int      # len(sample_idx) -- how many faces were sampled
+    rays_hit: int             # how many of those rays returned a first hit
+
+
+def _thickness_arrays(
+    mesh: trimesh.Trimesh,
+    n_ray_samples: int = 500,
+    rng: Optional[np.random.Generator] = None,
+) -> _ThicknessArrays:
+    """Ray-cast sampling only, independent of d_min -- wall_depths is the raw
+    measured thickness at each sampled point; thickness_penalty_detailed()
+    below applies the d_min-relative penalty formula to this. NOTE: does not
+    replicate the n_faces==0 / d_min<=0 short-circuit (that stays in the
+    caller, which must avoid touching rng at all in the d_min<=0 case -- see
+    thickness_penalty_detailed's docstring)."""
+    n_faces = len(mesh.faces)
+    if n_faces == 0:
+        return _ThicknessArrays(np.zeros(0), 0, 0)
+
+    rng = rng or np.random.default_rng()
+    sample_idx = rng.choice(n_faces, size=min(n_ray_samples, n_faces), replace=False)
+    eps = max(mesh.scale * 1e-4, 1e-9)
+    origins = mesh.triangles_center[sample_idx] - mesh.face_normals[sample_idx] * eps
+    directions = -mesh.face_normals[sample_idx]
+
+    try:
+        locations, index_ray, _index_tri = mesh.ray.intersects_location(origins, directions)
+    except Exception as e:
+        print(f"  (thickness_penalty: ray sampling skipped: {e})")
+        return _ThicknessArrays(np.zeros(0), len(sample_idx), 0)
+    if len(locations) == 0:
+        return _ThicknessArrays(np.zeros(0), len(sample_idx), 0)
+
+    dists = np.linalg.norm(locations - origins[index_ray], axis=1)
+    first_hit = {}
+    for d, ray_i in zip(dists, index_ray):
+        if ray_i not in first_hit or d < first_hit[ray_i]:
+            first_hit[ray_i] = d
+
+    if not first_hit:
+        return _ThicknessArrays(np.zeros(0), len(sample_idx), 0)
+    d = np.fromiter(first_hit.values(), dtype=np.float64)
+    return _ThicknessArrays(wall_depths=d, rays_requested=len(sample_idx), rays_hit=len(d))
 
 
 def thickness_penalty_detailed(
@@ -141,34 +219,12 @@ def thickness_penalty_detailed(
     Returns a ThicknessResult so a 0.0 penalty from ray-cast failure can be
     told apart from a genuinely thick mesh (see .valid).
     """
-    n_faces = len(mesh.faces)
-    if n_faces == 0 or d_min <= 0:
+    if len(mesh.faces) == 0 or d_min <= 0:
         return ThicknessResult(0.0, False)
-
-    rng = rng or np.random.default_rng()
-    sample_idx = rng.choice(n_faces, size=min(n_ray_samples, n_faces), replace=False)
-    eps = max(mesh.scale * 1e-4, 1e-9)
-    origins = mesh.triangles_center[sample_idx] - mesh.face_normals[sample_idx] * eps
-    directions = -mesh.face_normals[sample_idx]
-
-    try:
-        locations, index_ray, _index_tri = mesh.ray.intersects_location(origins, directions)
-    except Exception as e:
-        print(f"  (thickness_penalty: ray sampling skipped: {e})")
+    arrays = _thickness_arrays(mesh, n_ray_samples, rng)
+    if arrays.rays_hit == 0:
         return ThicknessResult(0.0, False)
-    if len(locations) == 0:
-        return ThicknessResult(0.0, False)
-
-    dists = np.linalg.norm(locations - origins[index_ray], axis=1)
-    first_hit = {}
-    for d, ray_i in zip(dists, index_ray):
-        if ray_i not in first_hit or d < first_hit[ray_i]:
-            first_hit[ray_i] = d
-
-    if not first_hit:
-        return ThicknessResult(0.0, False)
-    d = np.fromiter(first_hit.values(), dtype=np.float64)
-    excess = np.maximum(0.0, (d_min - d) / d_min)
+    excess = np.maximum(0.0, (d_min - arrays.wall_depths) / d_min)
     return ThicknessResult(float(np.mean(excess ** 2)), True)
 
 
@@ -184,6 +240,26 @@ def normalized_thickness_threshold(d_min_mm: float, print_size_mm: float) -> flo
     if print_size_mm <= 0:
         raise ValueError("print_size_mm must be positive")
     return d_min_mm / print_size_mm
+
+
+@dataclass(frozen=True)
+class _TopologyArrays:
+    edge_incidence: np.ndarray  # per-edge face count (1=open boundary, 2=manifold, >2=non-manifold)
+    n_open: int
+    n_nonmanifold: int
+    n_edges: int
+
+
+def _topology_arrays(mesh: trimesh.Trimesh) -> _TopologyArrays:
+    if len(mesh.faces) == 0:
+        return _TopologyArrays(np.zeros(0, dtype=np.int64), 0, 0, 0)
+    counts = np.bincount(mesh.edges_unique_inverse)
+    n_edges = len(counts)
+    if n_edges == 0:
+        return _TopologyArrays(counts, 0, 0, 0)
+    n_open = int(np.sum(counts == 1))
+    n_nonmanifold = int(np.sum(counts > 2))
+    return _TopologyArrays(edge_incidence=counts, n_open=n_open, n_nonmanifold=n_nonmanifold, n_edges=n_edges)
 
 
 def topology_penalty(
@@ -219,15 +295,13 @@ def topology_penalty(
     self-intersection count -- it reads as zero for two clean surface sheets
     passing through each other with no shared edge.
     """
-    if len(mesh.faces) == 0:
+    arrays = _topology_arrays(mesh)
+    if arrays.n_edges == 0:
         return 0.0
-    counts = np.bincount(mesh.edges_unique_inverse)
-    n_edges = len(counts)
-    if n_edges == 0:
-        return 0.0
-    n_open = int(np.sum(counts == 1))
-    n_nonmanifold = int(np.sum(counts > 2))
-    return float(w_open * (n_open / n_edges) + w_intersect * (n_nonmanifold / n_edges))
+    return float(
+        w_open * (arrays.n_open / arrays.n_edges)
+        + w_intersect * (arrays.n_nonmanifold / arrays.n_edges)
+    )
 
 
 @dataclass(frozen=True)
@@ -275,6 +349,35 @@ class JudgeScore:
     topology_penalty: float
 
 
+@dataclass
+class JudgeDetails:
+    """The per-face/per-vertex/per-edge arrays each penalty function computes
+    internally and normally throws away after reducing to a scalar. Not used
+    by the DPO ranking logic itself -- exists so a caller building a
+    visualization (see devlab/) can show histograms and per-element
+    breakdowns instead of only the four aggregate penalty scalars in
+    JudgeScore. All arrays are relative to the (possibly decimated) mesh that
+    was actually scored -- see faces_scored."""
+
+    # detail reward (R_Detail)
+    laplacian_mag: np.ndarray   # per-vertex ||Δx_v||^2
+    vertex_degree: np.ndarray   # per-vertex neighbor count
+    # overhang (L_OH)
+    overhang_cos: np.ndarray    # per-face n_i . g; 1.0 = straight down, -1.0 = straight up
+    face_areas: np.ndarray      # per-face area, same indexing as overhang_cos
+    # thickness (L_Th)
+    wall_depths: np.ndarray     # first-hit ray distance, successful rays only (world units)
+    rays_requested: int
+    rays_hit: int
+    # topology (L_Topo)
+    edge_incidence: np.ndarray  # per-edge face count (1=open, 2=manifold, >2=non-manifold)
+    n_open: int
+    n_nonmanifold: int
+    n_edges: int
+    # bookkeeping
+    faces_scored: int           # face count of the mesh actually scored (post-decimation)
+
+
 def _prepare_for_scoring(mesh: trimesh.Trimesh, max_faces: Optional[int]) -> trimesh.Trimesh:
     """Decimate a copy of mesh to at most max_faces before scoring. Does not
     touch the caller's mesh -- the DPO loop still hands the undecimated
@@ -288,26 +391,66 @@ def _prepare_for_scoring(mesh: trimesh.Trimesh, max_faces: Optional[int]) -> tri
     return trimesh.Trimesh(vertices=verts, faces=faces, process=False)
 
 
-def score_mesh(
+def score_mesh_detailed(
     mesh: trimesh.Trimesh,
     weights: Optional[JudgeWeights] = None,
     rng: Optional[np.random.Generator] = None,
-) -> JudgeScore:
-    """Compute S = alpha*R_Detail - (beta*L_OH + gamma*L_Th + delta*L_Topo)."""
+):
+    """Like score_mesh(), but also returns a JudgeDetails with the raw
+    per-face/per-vertex/per-edge arrays each penalty computes internally and
+    normally discards -- for visualization/debugging (see devlab/).
+
+    This is the ONE implementation of the S = alpha*R_Detail - (beta*L_OH +
+    gamma*L_Th + delta*L_Topo) computation; score_mesh() below is a
+    zero-cost wrapper that drops the JudgeDetails half of the return value.
+    There is deliberately no separate/duplicated scoring math anywhere else.
+
+    Returns (JudgeScore, JudgeDetails).
+    """
     weights = weights or JudgeWeights()
     mesh = _prepare_for_scoring(mesh, weights.max_faces_for_scoring)
 
-    r_detail = detail_reward(mesh)
-    l_oh = overhang_penalty(mesh, weights.theta_crit_deg)
-    l_th = thickness_penalty_detailed(mesh, weights.d_min, weights.n_ray_samples, rng)
-    l_topo = topology_penalty(mesh, weights.w_open, weights.w_intersect)
+    detail_arrays = _detail_reward_arrays(mesh)
+    r_detail = float(detail_arrays.laplacian_mag.sum())
+
+    oh_arrays = _overhang_arrays(mesh)
+    if len(oh_arrays.overhang_cos) == 0:
+        l_oh = 0.0
+    else:
+        cos_crit = math.cos(math.radians(weights.theta_crit_deg))
+        excess = np.maximum(0.0, oh_arrays.overhang_cos - cos_crit)
+        l_oh = float(np.sum(oh_arrays.face_areas * excess))
+
+    # Mirrors thickness_penalty_detailed's short-circuit exactly: when
+    # d_min <= 0, rng must stay untouched (no ray sampling at all), not just
+    # short-circuited after consuming random draws.
+    if weights.d_min <= 0:
+        th_arrays = _ThicknessArrays(np.zeros(0), 0, 0)
+        l_th = ThicknessResult(0.0, False)
+    else:
+        th_arrays = _thickness_arrays(mesh, weights.n_ray_samples, rng)
+        if th_arrays.rays_hit == 0:
+            l_th = ThicknessResult(0.0, False)
+        else:
+            excess = np.maximum(0.0, (weights.d_min - th_arrays.wall_depths) / weights.d_min)
+            l_th = ThicknessResult(float(np.mean(excess ** 2)), True)
+
+    topo_arrays = _topology_arrays(mesh)
+    if topo_arrays.n_edges == 0:
+        l_topo = 0.0
+    else:
+        l_topo = float(
+            weights.w_open * (topo_arrays.n_open / topo_arrays.n_edges)
+            + weights.w_intersect * (topo_arrays.n_nonmanifold / topo_arrays.n_edges)
+        )
+
     total = (
         weights.alpha * r_detail
         - weights.beta * l_oh
         - weights.gamma * l_th.penalty
         - weights.delta * l_topo
     )
-    return JudgeScore(
+    score = JudgeScore(
         total=total,
         detail_reward=r_detail,
         overhang_penalty=l_oh,
@@ -315,6 +458,31 @@ def score_mesh(
         thickness_valid=l_th.valid,
         topology_penalty=l_topo,
     )
+    details = JudgeDetails(
+        laplacian_mag=detail_arrays.laplacian_mag,
+        vertex_degree=detail_arrays.vertex_degree,
+        overhang_cos=oh_arrays.overhang_cos,
+        face_areas=oh_arrays.face_areas,
+        wall_depths=th_arrays.wall_depths,
+        rays_requested=th_arrays.rays_requested,
+        rays_hit=th_arrays.rays_hit,
+        edge_incidence=topo_arrays.edge_incidence,
+        n_open=topo_arrays.n_open,
+        n_nonmanifold=topo_arrays.n_nonmanifold,
+        n_edges=topo_arrays.n_edges,
+        faces_scored=len(mesh.faces),
+    )
+    return score, details
+
+
+def score_mesh(
+    mesh: trimesh.Trimesh,
+    weights: Optional[JudgeWeights] = None,
+    rng: Optional[np.random.Generator] = None,
+) -> JudgeScore:
+    """Compute S = alpha*R_Detail - (beta*L_OH + gamma*L_Th + delta*L_Topo)."""
+    score, _details = score_mesh_detailed(mesh, weights, rng)
+    return score
 
 
 def rank_candidates(
@@ -355,17 +523,39 @@ def rank_candidates(
     zero. This only adjusts the WINNER decision; the .total each JudgeScore
     reports is unchanged.
     """
+    winner_index, score_a, score_b, _cmp_a, _cmp_b, _details_a, _details_b = rank_candidates_detailed(
+        mesh_a, mesh_b, weights, rng,
+    )
+    return winner_index, score_a, score_b
+
+
+def rank_candidates_detailed(
+    mesh_a: trimesh.Trimesh,
+    mesh_b: trimesh.Trimesh,
+    weights: Optional[JudgeWeights] = None,
+    rng: Optional[np.random.Generator] = None,
+):
+    """Like rank_candidates(), but also returns (cmp_a, cmp_b, details_a,
+    details_b): the actual comparison values used to pick the winner (which
+    can differ from score_a.total/score_b.total under the thickness-fairness
+    adjustment below -- see rank_candidates' docstring) and the JudgeDetails
+    for each candidate, for visualization. rank_candidates() is a thin
+    wrapper that drops these four extra values; this is the one
+    implementation of the ranking logic.
+
+    Returns (winner_index, score_a, score_b, cmp_a, cmp_b, details_a, details_b).
+    """
     weights = weights or JudgeWeights()
     shared_rng = rng or np.random.default_rng()
     seed_state = shared_rng.bit_generator.state
 
     score_a_rng = np.random.Generator(type(shared_rng.bit_generator)())
     score_a_rng.bit_generator.state = seed_state
-    score_a = score_mesh(mesh_a, weights, score_a_rng)
+    score_a, details_a = score_mesh_detailed(mesh_a, weights, score_a_rng)
 
     score_b_rng = np.random.Generator(type(shared_rng.bit_generator)())
     score_b_rng.bit_generator.state = seed_state
-    score_b = score_mesh(mesh_b, weights, score_b_rng)
+    score_b, details_b = score_mesh_detailed(mesh_b, weights, score_b_rng)
 
     thickness_reliable = score_a.thickness_valid and score_b.thickness_valid
     cmp_a = score_a.total if thickness_reliable else score_a.total + weights.gamma * score_a.thickness_penalty
@@ -382,4 +572,4 @@ def rank_candidates(
         winner_index = 0 if a_finite else 1
     else:
         winner_index = 0 if cmp_a >= cmp_b else 1
-    return winner_index, score_a, score_b
+    return winner_index, score_a, score_b, cmp_a, cmp_b, details_a, details_b

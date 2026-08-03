@@ -393,6 +393,57 @@ def test_select_branch_window():
     print("  select_branch_window: steps in {1,2,3,4,12} all produce valid, in-range windows")
 
 
+def test_effective_t_branches():
+    # num_branches=1 (default): identical to the single-branch API, unchanged.
+    cfg1 = dpo_branch.DPOBranchConfig(t_branch=0.42)
+    assert cfg1.effective_t_branches() == [0.42]
+
+    # num_branches>1 ignores t_branch and spreads evenly across
+    # [T_BRANCH_MIN, T_BRANCH_MAX], descending (schedule order: high t first).
+    cfg2 = dpo_branch.DPOBranchConfig(num_branches=3)
+    branches = cfg2.effective_t_branches()
+    assert len(branches) == 3
+    assert math.isclose(branches[0], 0.7) and math.isclose(branches[-1], 0.3)
+    assert math.isclose(branches[1], 0.5)
+    assert all(a > b for a, b in zip(branches, branches[1:])), "must be strictly descending"
+
+    cfg4 = dpo_branch.DPOBranchConfig(num_branches=2)
+    assert cfg4.effective_t_branches() == [0.7, 0.3]
+    print("  DPOBranchConfig.effective_t_branches: num_branches=1 unchanged, >1 spreads across [0.3, 0.7]")
+
+
+def test_select_branch_windows_multi():
+    # 3 branches on a long-enough schedule -> 3 non-overlapping, ascending windows.
+    pairs = dpo_branch.build_t_pairs(24)
+    t_branches = dpo_branch.DPOBranchConfig(num_branches=3).effective_t_branches()
+    windows = dpo_branch.select_branch_windows(pairs, t_branches, k=2)
+    assert len(windows) == 3
+    for (i1, k1), (i2, k2) in zip(windows, windows[1:]):
+        assert i2 >= i1 + k1, f"windows must not overlap: {windows}"
+    for i, k in windows:
+        assert 0 <= i <= len(pairs) - k and k >= 1
+
+    # num_branches=1 must reproduce the exact single-branch window.
+    single = dpo_branch.select_branch_windows(pairs, [0.5], k=2)
+    assert single == [dpo_branch.select_branch_window(pairs, 0.5, 2)]
+
+    # Too many branches requested for a short schedule -> fewer windows
+    # returned, never an overlapping or out-of-range one.
+    short_pairs = dpo_branch.build_t_pairs(3)
+    t_branches_many = dpo_branch.DPOBranchConfig(num_branches=5).effective_t_branches()
+    windows_short = dpo_branch.select_branch_windows(short_pairs, t_branches_many, k=2)
+    assert len(windows_short) < 5
+    assert len(windows_short) >= 1
+    for (i1, k1), (i2, k2) in zip(windows_short, windows_short[1:]):
+        assert i2 >= i1 + k1
+
+    # empty schedule -> no windows, not a crash (select_branch_window itself
+    # still raises ValueError when called directly on an empty schedule --
+    # this is select_branch_windows degrading gracefully one level up).
+    assert dpo_branch.select_branch_windows([], [0.5, 0.3], k=2) == []
+    print("  select_branch_windows: multiple forks stay non-overlapping and in schedule order, degrade gracefully when too many are requested")
+
+
 def test_backfill_sampler_defaults():
     class FakeCfgSampler:
         def sample(self, model, noise, cond, neg_cond, steps=50, rescale_t=1.0,
@@ -478,6 +529,8 @@ TESTS = [
     test_preference_loss_signs,
     test_project_delta,
     test_select_branch_window,
+    test_effective_t_branches,
+    test_select_branch_windows_multi,
     test_backfill_sampler_defaults,
     test_rank_degradation,
     test_config_clamps,

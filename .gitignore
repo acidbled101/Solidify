@@ -19,3 +19,18 @@ output_3d*.png
 
 # Home hero 3D asset (intentional UI asset, NOT generated job output)
 !server/static/assets/specimen-042.stl
+
+# devlab/ (DPO Inspector) run traces: each real run can export multi-MB
+# candidate GLBs (on top of *.glb already being ignored above, trace.jsonl
+# itself isn't) -- keep per-run output out of git, same as jobs/ above.
+# The synthetic-demo trace is a bundled, tiny (~100KB) example that exercises
+# the real geometric_judge scoring path without needing a GPU or a 20min
+# run -- kept, same pattern as the specimen-042.stl carve-out above.
+devlab/traces/*/
+!devlab/traces/synthetic-demo/
+!devlab/traces/synthetic-demo/*.glb
+!devlab/traces/synthetic-demo/*.stl
+!devlab/traces/synthetic-demo/output/
+!devlab/traces/synthetic-demo/output/*.glb
+!devlab/traces/synthetic-demo/output/*.stl
+!devlab/traces/synthetic-demo/output/*.obj

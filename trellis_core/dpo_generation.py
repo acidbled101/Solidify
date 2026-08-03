@@ -34,7 +34,7 @@ import dataclasses
 import os
 import time
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Callable, Dict, Optional
 
 from . import bootstrap  # noqa: F401  (ensures env/path setup already ran)
 
@@ -60,7 +60,7 @@ class DPOGenerationResult:
     texture (used_metal_bake tells you which bake path, not whether one ran).
     """
     printable_result: printable.PrintableResult
-    dpo_report: Optional[dpo_branch.DPOBranchReport]
+    dpo_report: Optional[dpo_branch.DPOMultiBranchReport]
     raw_vertex_count: int
     raw_face_count: int
     generation_seconds: float
@@ -83,6 +83,7 @@ def run_generation_with_dpo(
     voxel_pitch: Optional[float] = None,
     min_object_ratio: float = 0.05,
     max_objects: int = 10,
+    on_event: Optional[Callable[[str, Dict[str, Any]], None]] = None,
 ) -> DPOGenerationResult:
     """Generate via the DPO-branched shape-SLat sampler, then run the result
     through printable.py's EXISTING single-object pipeline
@@ -100,7 +101,23 @@ def run_generation_with_dpo(
     IndexError/AssertionError signature match against _WATCHDOG_SIGNATURES,
     which can raise from inside sample_sparse_structure/decode_shape_slat
     before an empty-mesh check would ever be reached.
+
+    on_event: forwarded verbatim to
+        dpo_branch.sample_shape_slat_with_dpo_branch (see its docstring for
+        the event types/payloads) -- this function additionally emits its
+        own "stage" events around the parts it owns (cond/sparse-structure,
+        decode, print-prep) and a final "printable_result" event carrying
+        the existing printable.py pipeline's diagnostics/fidelity/watertight
+        verdict, so a caller doesn't need a second mechanism to see the
+        post-processing outcome. See devlab/ for the consumer.
     """
+    def _emit(event_type: str, **payload) -> None:
+        if on_event is None:
+            return
+        try:
+            on_event(event_type, payload)
+        except Exception as e:  # pragma: no cover - reporting must never break generation
+            print(f"[dpo_generation] on_event callback raised ({event_type}): {e}")
     if pipeline_type not in ("512", "1024"):
         raise ValueError(
             f"run_generation_with_dpo only supports pipeline_type '512' or "
@@ -144,6 +161,7 @@ def run_generation_with_dpo(
     t0 = time.time()
 
     try:
+        _emit("stage", name="preprocess_image")
         image = pipeline.preprocess_image(image)
         torch.manual_seed(seed)
         # sample_sparse_structure ALWAYS takes the 512 cond, even on the
@@ -159,8 +177,10 @@ def run_generation_with_dpo(
         cond_512 = pipeline.get_cond([image], 512)
         cond = cond_512 if pipeline_type == "512" else pipeline.get_cond([image], 1024)
 
+        _emit("stage", name="sample_sparse_structure")
         ss_res = {"512": 32, "1024": 64}[pipeline_type]
         coords = pipeline.sample_sparse_structure(cond_512, ss_res, 1, sampler_overrides)
+        _emit("stage", name="sparse_structure_done", n_voxels=int(coords.shape[0]))
 
         flow_model = pipeline.models[f"shape_slat_flow_model_{pipeline_type}"]
         shape_slat, dpo_report = dpo_branch.sample_shape_slat_with_dpo_branch(
@@ -168,9 +188,18 @@ def run_generation_with_dpo(
             sampler_params=sampler_overrides,
             dpo_config=dpo_config,
             return_report=True,
+            on_event=on_event,
         )
 
-        if torch.cuda.is_available():
+        # torch.cuda.is_available() is always False on Apple Silicon -- there
+        # is no CUDA device -- so this call never actually fired on the target
+        # hardware. MPS has its own cache to release; without this, cached
+        # blocks freed by dpo_branch.py's `del`s further up were never
+        # actually returned to the pool before the (memory-heavier) decode
+        # below ran.
+        if torch.backends.mps.is_available():
+            torch.mps.empty_cache()
+        elif torch.cuda.is_available():
             torch.cuda.empty_cache()
 
         # decode_shape_slat directly, NOT decode_latent(shape_slat, tex_slat,
@@ -182,6 +211,7 @@ def run_generation_with_dpo(
         # unconditional no-op on this repo's patched TRELLIS.2 checkout (the
         # Metal cumesh port segfaults on decoder-sized meshes) -- so skipping
         # decode_latent loses nothing beyond the tex stage itself.
+        _emit("stage", name="decode_shape_slat")
         meshes, _subs = pipeline.decode_shape_slat(shape_slat, resolution)  # already @torch.no_grad()
     except (IndexError, AssertionError) as e:
         msg = str(e)
@@ -213,9 +243,15 @@ def run_generation_with_dpo(
         print(f"[dpo_generation] {len(comps)} large objects detected; keeping the largest only.")
     mesh = comps[0]
     original = mesh.copy()
+    # The mesh as decoded, before printable.process_object()'s watertight
+    # repair / decimation / solid-infill remesh -- exposed so a caller (see
+    # devlab/) can compare the DPO-branched result against a reference
+    # without print-prep's own resolution/topology changes in the way.
+    _emit("raw_result", mesh=original)
 
     os.makedirs(os.path.dirname(os.path.abspath(output_prefix)), exist_ok=True)
 
+    _emit("stage", name="print_prep", raw_vertex_count=int(verts.shape[0]), raw_face_count=int(faces.shape[0]))
     opts = printable.PrintableOptions(
         target_faces=target_faces, solid_infill=solid_infill, voxel_pitch=voxel_pitch,
     )
@@ -225,6 +261,13 @@ def run_generation_with_dpo(
     glb_path, stl_path = printable.export_glb_and_stl(processed, visual_info, new_vertex_colors, output_prefix)
 
     t_postprocess = time.time() - t_post0
+    _emit(
+        "printable_result",
+        watertight=bool(processed.is_watertight), diagnostics=diag, fidelity=fid,
+        vertex_count=int(len(processed.vertices)), face_count=int(len(processed.faces)),
+        generation_seconds=t_gen, postprocess_seconds=t_postprocess,
+        glb_path=glb_path, stl_path=stl_path,
+    )
 
     printable_result = printable.PrintableResult(
         mode="single",
