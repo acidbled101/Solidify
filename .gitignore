@@ -34,3 +34,6 @@ devlab/traces/*/
 !devlab/traces/synthetic-demo/output/*.glb
 !devlab/traces/synthetic-demo/output/*.stl
 !devlab/traces/synthetic-demo/output/*.obj
+
+# JIT-built CPU extension (see backends/dual_grid_cpu.py)
+.build/
