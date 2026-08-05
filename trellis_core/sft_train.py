@@ -58,6 +58,7 @@ import torch
 
 from .train_run import TrainRun, Control
 from . import lora as lora_mod
+from .dpo_branch import checkpointed_blocks
 from .flow_dpo_objective import noise_latent, velocity_target, sample_timesteps, FlowDPOConfig
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -261,6 +262,10 @@ def main(argv=None) -> int:
                     help="how many held-out samples to render per eval")
     ap.add_argument("--no-baseline-eval", dest="baseline_eval", action="store_false",
                     help="skip the step-0 base-model eval that anchors every chart")
+    ap.add_argument("--no-grad-checkpointing", dest="grad_checkpointing",
+                    action="store_false",
+                    help="disable activation checkpointing (will swap-thrash on 32GB)")
+    ap.add_argument("--empty-cache-every", type=int, default=5)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--smoke", type=int, default=0, help="run N steps and exit (no eval)")
     args = ap.parse_args(argv)
@@ -360,23 +365,41 @@ def main(argv=None) -> int:
         opt.zero_grad(set_to_none=True)
         acc_loss = 0.0
         bin_losses = {}
-        for _ in range(args.accum):
-            if cursor >= len(order):
-                rng.shuffle(order); cursor = 0
-            fid = train_ds.ids[order[cursor]]; cursor += 1
-            coords, feats, cond = train_ds.load(fid, args.device)
-            if coords.shape[0] > args.max_tokens:
-                skipped += 1
-                continue
-            loss, t_val = flow_matching_loss(model, coords, feats, cond, cfg,
-                                             p_uncond=args.p_uncond)
-            bin_losses.setdefault(min(9, int(t_val * 10)), []).append(float(loss))
-            (loss / args.accum).backward()
-            acc_loss += float(loss) / args.accum
-            del coords, feats, cond, loss
+        step_tokens = 0
+        # Gradient checkpointing is NOT optional here. A backward through this
+        # model retains ~38GB of activations (measured in dpo_branch, see
+        # checkpointed_blocks' docstring) against 32GB of physical memory, so
+        # without it the step does not OOM -- it silently falls into swap. The
+        # first run of this trainer took 464s for one step with the process in
+        # uninterruptible IO wait, RSS collapsed from 14.7GB to 117MB, and
+        # 24.4GB of a 25.6GB swap file in use. It was thrashing, not computing.
+        with checkpointed_blocks(model, args.grad_checkpointing):
+          for _ in range(args.accum):
+              if cursor >= len(order):
+                  rng.shuffle(order); cursor = 0
+              fid = train_ds.ids[order[cursor]]; cursor += 1
+              coords, feats, cond = train_ds.load(fid, args.device)
+              if coords.shape[0] > args.max_tokens:
+                  skipped += 1
+                  continue
+              loss, t_val = flow_matching_loss(model, coords, feats, cond, cfg,
+                                               p_uncond=args.p_uncond)
+              bin_losses.setdefault(min(9, int(t_val * 10)), []).append(float(loss))
+              step_tokens += int(coords.shape[0])
+              (loss / args.accum).backward()
+              acc_loss += float(loss) / args.accum
+              del coords, feats, cond, loss
 
         gn = torch.nn.utils.clip_grad_norm_(params, 1.0)
         opt.step()
+
+        # MPS holds freed blocks in a cache rather than returning them, and
+        # latent sizes here vary 136..11685 tokens, so the cache grows to the
+        # high-water mark of the largest sample seen and stays there. On a
+        # 32GB machine that is exactly what tips a healthy run into swap, so
+        # it is released periodically. Cheap next to a ~25s step.
+        if args.device == "mps" and step % args.empty_cache_every == 0:
+            torch.mps.empty_cache()
 
         ema_loss = acc_loss if ema_loss is None else 0.92 * ema_loss + 0.08 * acc_loss
         dt = time.time() - t_step
@@ -389,7 +412,7 @@ def main(argv=None) -> int:
             run.log("train", step, loss=acc_loss, loss_ema=ema_loss,
                     lr=opt.param_groups[0]["lr"], grad_norm=float(gn),
                     step_s=dt, mem_gb=mem, mem_peak_gb=peak, skipped=skipped,
-                    epoch=epoch, samples_seen=samples_seen,
+                    epoch=epoch, samples_seen=samples_seen, tokens=step_tokens,
                     **{f"t_bin_{k}": float(np.mean(v)) for k, v in bin_losses.items()})
         elapsed = time.time() - t_start
         run.status(step=step, total_steps=total_steps, state="training",
