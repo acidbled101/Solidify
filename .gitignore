@@ -37,3 +37,6 @@ devlab/traces/*/
 
 # JIT-built CPU extension (see backends/dual_grid_cpu.py)
 .build/
+
+# training run artifacts (metrics, checkpoints, samples)
+runs/

@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<title>TRELLIS training</title>
+<link rel="stylesheet" href="/train.css">
+</head>
+<body>
+
+<header class="bar">
+  <div class="bar-left">
+    <select id="run-select" aria-label="Run"></select>
+    <span id="alive" class="pill">—</span>
+  </div>
+  <div class="bar-right">
+    <span id="step" class="mono">step —</span>
+    <button id="refresh" class="ghost" title="Refresh now">↻</button>
+  </div>
+</header>
+
+<main>
+  <section class="cards" id="headline">
+    <div class="card stat"><label>Step</label><b id="s-step">—</b><small id="s-eta"></small></div>
+    <div class="card stat"><label>Train loss</label><b id="s-loss">—</b><small id="s-loss-d"></small></div>
+    <div class="card stat"><label>Held-out</label><b id="s-heldout">—</b><small id="s-heldout-d"></small></div>
+    <div class="card stat"><label>Watertight</label><b id="s-wt">—</b><small>eval samples</small></div>
+    <div class="card stat"><label>Elapsed</label><b id="s-elapsed">—</b><small id="s-rate"></small></div>
+    <div class="card stat"><label>Memory</label><b id="s-mem">—</b><small id="s-steptime"></small></div>
+  </section>
+
+  <section class="card">
+    <h2>Loss</h2>
+    <canvas id="c-loss" height="200"></canvas>
+    <div class="legend" id="l-loss"></div>
+  </section>
+
+  <section class="card">
+    <h2>Printability on held-out samples <small>lower is better except R_Detail</small></h2>
+    <canvas id="c-print" height="200"></canvas>
+    <div class="legend" id="l-print"></div>
+  </section>
+
+  <section class="grid2">
+    <div class="card">
+      <h2>Image fidelity <small>guards prompt-drift</small></h2>
+      <canvas id="c-fid" height="160"></canvas>
+      <div class="legend" id="l-fid"></div>
+    </div>
+    <div class="card">
+      <h2>Diversity <small>guards collapse</small></h2>
+      <canvas id="c-div" height="160"></canvas>
+      <div class="legend" id="l-div"></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Samples</h2>
+    <div id="gallery" class="gallery"><p class="muted">No eval samples yet.</p></div>
+  </section>
+
+  <section class="card">
+    <h2>Control <small>applied live, no restart</small></h2>
+    <div class="control">
+      <label>Learning rate <input id="k-lr" type="text" inputmode="decimal" placeholder="unchanged"></label>
+      <label>Eval every <input id="k-eval" type="number" inputmode="numeric" placeholder="steps"></label>
+      <label>Checkpoint every <input id="k-ckpt" type="number" inputmode="numeric" placeholder="steps"></label>
+      <label class="wide">Note <input id="k-note" type="text" placeholder="why you changed it"></label>
+    </div>
+    <div class="buttons">
+      <button id="b-apply" class="primary">Apply</button>
+      <button id="b-eval">Eval now</button>
+      <button id="b-pause">Pause</button>
+      <button id="b-resume">Resume</button>
+      <button id="b-stop" class="danger">Stop after checkpoint</button>
+    </div>
+    <p id="control-state" class="muted mono"></p>
+  </section>
+
+  <section class="card">
+    <h2>Log</h2>
+    <pre id="log" class="log"></pre>
+  </section>
+
+  <section class="card">
+    <h2>Access</h2>
+    <p id="hosts" class="mono muted"></p>
+  </section>
+</main>
+
+<script src="/train.js"></script>
+</body>
+</html>
