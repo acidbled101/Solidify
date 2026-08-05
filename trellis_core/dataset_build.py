@@ -257,8 +257,17 @@ def main(argv=None) -> int:
             mf.write(json.dumps(info) + "\n")
             n_ok += 1
             per = (time.time() - t_start) / i
-            run.log("train", n_ok, loss=float(info["n_tokens"]),
-                    step_s=sum(info["seconds"].values()), ok=1)
+            # Named fields, not a `loss` flavoured with token counts. An
+            # earlier version logged n_tokens as `loss` so the build would
+            # appear on the training dashboard at all; the chart then plotted
+            # voxel counts jumping between 1258 and 4326 under a "Loss" axis,
+            # which is not a rough edge but a dashboard telling you something
+            # false. Run kind now drives the view instead.
+            run.log("progress", n_ok,
+                    n_tokens=int(info["n_tokens"]),
+                    seconds=sum(info["seconds"].values()),
+                    faces=int(info["faces"]),
+                    coverage=info["coverage"])
             run.status(step=n_ok, total_steps=len(rows), state="building",
                        eta_s=(len(todo) - i) * per, failures=n_fail)
             print(f"[{i}/{len(todo)}] {fid}  tokens {info['n_tokens']:>5}  "

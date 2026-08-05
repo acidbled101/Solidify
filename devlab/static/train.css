@@ -114,3 +114,19 @@ canvas { width: 100%; display: block; }
 
 .mono { font-family: var(--mono); font-size: .78rem; }
 .muted { color: var(--muted); }
+
+/* Progress bar for dataset builds and bounded training runs. */
+.progress {
+  height: 8px; border-radius: 999px; overflow: hidden;
+  background: color-mix(in srgb, var(--line) 70%, transparent);
+}
+.progress > div {
+  height: 100%; width: 0;
+  background: linear-gradient(90deg, var(--accent), var(--good));
+  border-radius: 999px;
+  transition: width .4s ease;
+}
+#progress-text { margin: .5rem 0 0; }
+
+/* Panels hidden because they do not apply to this run kind. */
+[data-mode].hidden-mode { display: none; }

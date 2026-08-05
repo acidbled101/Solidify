@@ -48,11 +48,13 @@ const state = {
   inFlight: false,
   dirty: false,
   drawQueued: false,
+  mode: null,
   timer: null,
 };
 
 const $ = (id) => document.getElementById(id);
 const fmt = (v, d = 4) => (v === null || v === undefined || Number.isNaN(v)) ? '—' : (+v).toFixed(d);
+const median = (a) => { const b=[...a].sort((x,y)=>x-y); return b.length? (b.length%2? b[(b.length-1)/2] : (b[b.length/2-1]+b[b.length/2])/2) : null; };
 const fmtDur = (s) => {
   if (s == null) return '—';
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
@@ -81,6 +83,33 @@ function downsample(points, max = MAX_DRAW_POINTS) {
     if (mn[0] <= mx[0]) { out.push(mn); if (mx !== mn) out.push(mx); }
     else { out.push(mx); out.push(mn); }
   }
+  return out;
+}
+
+/* Axis bounds are sticky. Recomputing exact min/max every poll makes the whole
+ * chart shift each time a point arrives, so a curve appears to wobble even
+ * when the numbers are settled. Instead: round out to "nice" bounds and keep
+ * them until the data actually leaves, or until it occupies so little of the
+ * range that the chart has gone flat. */
+const AXIS = new Map();
+
+function niceBounds(key, lo, hi) {
+  if (!(hi > lo)) { const e = Math.abs(hi || 1) * 0.1 || 1; lo = hi - e; hi = hi + e; }
+  const prev = AXIS.get(key);
+  if (prev && lo >= prev.lo && hi <= prev.hi) {
+    // Still inside. Keep unless the data now fills less than 40% of the
+    // range, in which case the chart has visibly flattened and a rescale is
+    // more honest than a stable-but-useless axis.
+    if ((hi - lo) > 0.4 * (prev.hi - prev.lo)) return prev;
+  }
+  const span = hi - lo;
+  const pad = span * 0.1;
+  lo -= pad; hi += pad;
+  const raw = (hi - lo) / 4;
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const step = [1, 2, 2.5, 5, 10].find(m => m * mag >= raw) * mag;
+  const out = { lo: Math.floor(lo / step) * step, hi: Math.ceil(hi / step) * step, step };
+  AXIS.set(key, out);
   return out;
 }
 
@@ -117,30 +146,27 @@ function drawLines(canvas, series, opts = {}) {
   }
 
   const pad = { l: 46, r: 8, t: 8, b: 20 };
-  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  let x0 = Infinity, x1 = -Infinity, dlo = Infinity, dhi = -Infinity;
   for (const s of live) for (const [x, y] of s.points) {
     if (x < x0) x0 = x; if (x > x1) x1 = x;
-    if (y < y0) y0 = y; if (y > y1) y1 = y;
+    if (y < dlo) dlo = y; if (y > dhi) dhi = y;
   }
   if (x1 === x0) x1 = x0 + 1;
-  if (y1 === y0) { const e = Math.abs(y0 || 1) * 0.1; y1 = y0 + e; y0 -= e; }
-  const padY = (y1 - y0) * 0.08; y0 -= padY; y1 += padY;
+  const b = niceBounds(opts.key || canvas.id, dlo, dhi);
+  const y0 = b.lo, y1 = b.hi;
 
   const X = (v) => pad.l + (v - x0) / (x1 - x0) * (w - pad.l - pad.r);
   const Y = (v) => h - pad.b - (v - y0) / (y1 - y0) * (h - pad.t - pad.b);
 
   ctx.strokeStyle = line; ctx.lineWidth = 1; ctx.fillStyle = muted;
   ctx.font = '10px ui-monospace, monospace';
+  const ticks = [];
+  for (let v = y0; v <= y1 + b.step * 1e-6; v += b.step) ticks.push(v);
   ctx.beginPath();
-  for (let i = 0; i <= 3; i++) {
-    const y = Y(y0 + (y1 - y0) * i / 3);
-    ctx.moveTo(pad.l, y); ctx.lineTo(w - pad.r, y);
-  }
+  for (const v of ticks) { const y = Y(v); ctx.moveTo(pad.l, y); ctx.lineTo(w - pad.r, y); }
   ctx.stroke();
-  for (let i = 0; i <= 3; i++) {
-    const v = y0 + (y1 - y0) * i / 3;
-    ctx.fillText(opts.fmtY ? opts.fmtY(v) : v.toPrecision(3), 4, Y(v) + 3);
-  }
+  const fy = opts.fmtY || ((v) => Math.abs(v) >= 1000 ? v.toLocaleString() : String(+v.toFixed(6)));
+  for (const v of ticks) ctx.fillText(fy(v), 4, Y(v) + 3);
   ctx.fillText(String(Math.round(x0)), pad.l, h - 6);
   const lastLabel = String(Math.round(x1));
   ctx.fillText(lastLabel, w - pad.r - ctx.measureText(lastLabel).width, h - 6);
@@ -225,7 +251,32 @@ function scheduleDraw() {
 
 /* ---------------- render ---------------- */
 
-function setText(el, text) { if (el.textContent !== text) el.textContent = text; }
+function setText(el, text) { if (el && el.textContent !== text) el.textContent = text; }
+
+/** Which panels make sense for this run. A dataset build has no loss, no
+ *  held-out set and no samples; showing it four permanently-empty charts and
+ *  a training control panel is worse than showing nothing. */
+function runKind() {
+  const meta = (state.status && state.status.meta) || {};
+  return ((meta.config || {}).kind === 'dataset_build') ? 'dataset' : 'train';
+}
+
+function applyMode(mode) {
+  if (state.mode === mode) return;
+  state.mode = mode;
+  document.querySelectorAll('[data-mode]').forEach(el => {
+    el.classList.toggle('hidden-mode', el.dataset.mode !== mode);
+  });
+  AXIS.clear();
+}
+
+function statCards(cards) {
+  const html = cards.map(c =>
+    `<div class="card stat"><label>${c.label}</label><b>${c.value}</b><small class="${c.cls || ''}">${c.sub || ''}</small></div>`
+  ).join('');
+  const el = $('headline');
+  if (el.innerHTML !== html) el.innerHTML = html;
+}
 
 function render() {
   const st = state.status || {};
@@ -235,28 +286,68 @@ function render() {
   else if (status.heartbeat) { setText(pill, `stale ${fmtDur(st.stale_s)}`); pill.className = 'pill stale'; }
   else { setText(pill, 'no heartbeat'); pill.className = 'pill dead'; }
 
+  const mode = runKind();
+  applyMode(mode);
+
   const last = state.train[state.train.length - 1] || {};
   const step = status.step ?? last.step;
-  setText($('step'), `step ${step ?? '—'}`);
-  setText($('s-step'), String(step ?? '—'));
-  setText($('s-eta'), status.eta_s ? `eta ${fmtDur(status.eta_s)}` : (status.total_steps ? `of ${status.total_steps}` : ''));
-  setText($('s-loss'), fmt(last.loss));
-  setText($('s-elapsed'), fmtDur(status.elapsed_s));
-  setText($('s-rate'), last.step_s ? `${last.step_s.toFixed(1)}s/step` : '');
-  setText($('s-steptime'), last.grad_norm != null ? `|g| ${fmt(last.grad_norm, 2)}` : '');
-  setText($('s-mem'), last.mem_gb != null ? `${last.mem_gb.toFixed(1)} GB` : '—');
+  setText($('step'), (mode === 'dataset' ? 'model ' : 'step ') + (step ?? '—'));
+
+  // Progress bar whenever the run has a known end.
+  const total = status.total_steps;
+  const wrap = $('progress-wrap');
+  if (total && step != null) {
+    wrap.hidden = false;
+    const pct = Math.max(0, Math.min(100, 100 * step / total));
+    $('progress-bar').style.width = pct.toFixed(1) + '%';
+    setText($('progress-text'),
+      `${step} / ${total}  (${pct.toFixed(1)}%)` +
+      (status.eta_s ? `   eta ${fmtDur(status.eta_s)}` : '') +
+      (status.failures ? `   ${status.failures} failed` : ''));
+  } else {
+    wrap.hidden = true;
+  }
+
+  if (mode === 'dataset') {
+    const toks = state.train.map(r => r.n_tokens ?? r.loss).filter(Number.isFinite);
+    const secs = state.train.map(r => r.seconds ?? r.step_s).filter(Number.isFinite);
+    const mean = (a) => a.length ? a.reduce((x, y) => x + y, 0) / a.length : null;
+    statCards([
+      { label: 'Built', value: String(step ?? '—'), sub: total ? `of ${total}` : '' },
+      { label: 'Failed', value: String(status.failures ?? 0), cls: status.failures ? 'up' : '' },
+      { label: 'Median voxels', value: toks.length ? String(Math.round(median(toks))) : '—', sub: 'per latent' },
+      { label: 'Sec / model', value: secs.length ? mean(secs).toFixed(1) : '—', sub: 'mean' },
+      { label: 'Elapsed', value: fmtDur(status.elapsed_s), sub: status.state || '' },
+      { label: 'ETA', value: status.eta_s ? fmtDur(status.eta_s) : '—', sub: 'remaining' },
+    ]);
+    if (state.dirty) {
+      state.dirty = false;
+      const tokSeries = [{ label: 'voxels per model', points: state.train.map(r => [r.step, r.n_tokens ?? r.loss]), color: COLORS[4] }];
+      drawLines($('c-tokens'), tokSeries, { key: 'tokens' }); legend($('l-tokens'), tokSeries);
+      const secSeries = [{ label: 'seconds per model', points: state.train.map(r => [r.step, r.seconds ?? r.step_s]), color: COLORS[2] }];
+      drawLines($('c-secs'), secSeries, { key: 'secs' }); legend($('l-secs'), secSeries);
+    }
+    setText($('control-state'), '');
+    return;
+  }
 
   const ev = state.evals[state.evals.length - 1] || {};
-  setText($('s-heldout'), fmt(ev.heldout_loss));
-  setText($('s-wt'), ev.watertight_rate != null ? `${(ev.watertight_rate * 100).toFixed(0)}%` : '—');
-
   const prev = state.evals[state.evals.length - 2];
+  let heldoutSub = '';
+  let heldoutCls = '';
   if (prev && ev.heldout_loss != null && prev.heldout_loss != null) {
     const d = ev.heldout_loss - prev.heldout_loss;
-    const el = $('s-heldout-d');
-    setText(el, `${d >= 0 ? '+' : ''}${d.toFixed(4)}`);
-    el.className = d > 0 ? 'up' : 'down';
+    heldoutSub = `${d >= 0 ? '+' : ''}${d.toFixed(4)}`;
+    heldoutCls = d > 0 ? 'up' : 'down';
   }
+  statCards([
+    { label: 'Step', value: String(step ?? '—'), sub: status.eta_s ? `eta ${fmtDur(status.eta_s)}` : (total ? `of ${total}` : '') },
+    { label: 'Train loss', value: fmt(last.loss), sub: last.lr != null ? `lr ${last.lr.toExponential(1)}` : '' },
+    { label: 'Held-out', value: fmt(ev.heldout_loss), sub: heldoutSub, cls: heldoutCls },
+    { label: 'Watertight', value: ev.watertight_rate != null ? `${(ev.watertight_rate * 100).toFixed(0)}%` : '—', sub: 'eval samples' },
+    { label: 'Elapsed', value: fmtDur(status.elapsed_s), sub: last.step_s ? `${last.step_s.toFixed(1)}s/step` : '' },
+    { label: 'Memory', value: last.mem_gb != null ? `${last.mem_gb.toFixed(1)} GB` : '—', sub: last.grad_norm != null ? `|g| ${fmt(last.grad_norm, 2)}` : '' },
+  ]);
 
   // Charts are the expensive part; skip entirely when no new records arrived.
   if (state.dirty) {
@@ -267,7 +358,7 @@ function render() {
       { label: 'train (ema)', points: ema(lossPts.filter(p => Number.isFinite(p[1]))), color: COLORS[0] },
       { label: 'held-out', points: state.evals.map(r => [r.step, r.heldout_loss]), color: COLORS[1] },
     ];
-    drawLines($('c-loss'), lossSeries); legend($('l-loss'), lossSeries);
+    drawLines($('c-loss'), lossSeries, { key: 'loss' }); legend($('l-loss'), lossSeries);
 
     const P = (k) => state.evals.map(r => [r.step, r[k]]);
     const printSeries = [
@@ -277,19 +368,19 @@ function render() {
       { label: 'R_Detail', points: P('R_Detail'), color: COLORS[3] },
       { label: 'watertight rate', points: P('watertight_rate'), color: COLORS[4] },
     ];
-    drawLines($('c-print'), printSeries); legend($('l-print'), printSeries);
+    drawLines($('c-print'), printSeries, { key: 'print' }); legend($('l-print'), printSeries);
 
     const fidSeries = [
       { label: 'image similarity', points: P('image_similarity'), color: COLORS[0] },
       { label: 'chamfer vs base', points: P('chamfer_vs_base'), color: COLORS[2] },
     ];
-    drawLines($('c-fid'), fidSeries); legend($('l-fid'), fidSeries);
+    drawLines($('c-fid'), fidSeries, { key: 'fid' }); legend($('l-fid'), fidSeries);
 
     const divSeries = [
       { label: 'mode entropy', points: P('mode_entropy'), color: COLORS[1] },
       { label: 'pairwise dist', points: P('sample_dispersion'), color: COLORS[4] },
     ];
-    drawLines($('c-div'), divSeries); legend($('l-div'), divSeries);
+    drawLines($('c-div'), divSeries, { key: 'div' }); legend($('l-div'), divSeries);
   }
 
   const c = st.control || {};
@@ -342,8 +433,9 @@ function wire() {
     state.runId = e.target.value;
     Object.assign(state, {
       offset: 0, train: [], evals: [], lastGalleryDir: null,
-      lastLogText: null, lastLog: 0, lastGallery: 0, dirty: true,
+      lastLogText: null, lastLog: 0, lastGallery: 0, dirty: true, mode: null,
     });
+    AXIS.clear();
     tick();
   };
   $('refresh').onclick = () => { state.lastLog = 0; state.lastGallery = 0; tick(); };
