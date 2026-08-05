@@ -40,3 +40,6 @@ devlab/traces/*/
 
 # training run artifacts (metrics, checkpoints, samples)
 runs/
+
+# built datasets (latents, conditioning images, embeddings)
+data/
