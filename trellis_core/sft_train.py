@@ -152,13 +152,14 @@ def evaluate(model, pipeline, ds: SlatDataset, cfg: FlowDPOConfig, *,
     the structure model is untouched by training, so letting it re-sample would
     inject variance that has nothing to do with the thing being measured.
     """
+    import os
     import trimesh
     from trellis2.modules import sparse as sp
     from . import geometric_judge
 
     out: Dict[str, List[float]] = {k: [] for k in
                                    ("heldout_loss", "L_OH", "L_Th", "L_Topo", "R_Detail", "S")}
-    watertight, dispersion_feats = [], []
+    watertight, dispersion_feats, errors, sims = [], [], [], []
     sampler = pipeline.shape_slat_sampler
     norm = pipeline.shape_slat_normalization
     mean = torch.as_tensor(norm["mean"], device=device)
@@ -179,20 +180,43 @@ def evaluate(model, pipeline, ds: SlatDataset, cfg: FlowDPOConfig, *,
         out["heldout_loss"].append(float((pred.feats.float() - v_tgt.float()).pow(2).mean()))
 
         # sample -> decode -> judge
+        # Common random numbers: the sampling noise is seeded per held-out
+        # object and reused at every eval, so successive evals are a PAIRED
+        # comparison of the same trajectory rather than independent draws.
+        # Without this, two evals of the SAME base model measured L_OH at
+        # 0.2889 and 0.3871 -- a 34% swing from noise alone, which would bury
+        # any training effect of plausible size. Same principle the judge
+        # already uses for its thickness raycasts.
+        g_noise = torch.Generator(device="cpu").manual_seed(9000 + i)
         noise = sp.SparseTensor(
-            feats=torch.randn(coords.shape[0], model.in_channels, device=device),
+            feats=torch.randn(coords.shape[0], model.in_channels, generator=g_noise).to(device),
             coords=coords)
-        slat = sampler.sample(model, noise, cond=cond, neg_cond=torch.zeros_like(cond),
-                              steps=steps, verbose=False).samples
-        slat = slat * std + mean
+        # Use the pipeline's OWN sampler params. The shape SLat sampler is a
+        # CFG + guidance-interval sampler whose _inference_model requires
+        # guidance_strength and guidance_interval; passing only `steps` yields
+        # a sample that is not what inference produces. These come from
+        # pipeline.json (guidance_strength 7.5, rescale 0.5, interval
+        # [0.6, 1.0], rescale_t 3.0) so eval measures the model as it will
+        # actually be used.
+        sp_params = {**pipeline.shape_slat_sampler_params}
+        sp_params["steps"] = steps
         try:
+            slat = sampler.sample(model, noise, cond=cond,
+                                  neg_cond=torch.zeros_like(cond),
+                                  verbose=False, **sp_params).samples
+            slat = slat * std + mean
             meshes, _ = pipeline.decode_shape_slat(slat, decode_resolution)
             m = meshes[0]
             tm = trimesh.Trimesh(vertices=m.vertices.detach().float().cpu().numpy(),
                                  faces=m.faces.detach().cpu().numpy(), process=False)
-        except Exception:
+        except Exception as e:
+            # Never silent. A baseline that reports n_eval=0 with no reason is
+            # how a 12-hour run produces no usable eval at all -- which is
+            # exactly what happened on the first launch.
+            errors.append(f"{fid}: {type(e).__name__}: {e}")
             continue
         if len(tm.faces) == 0:
+            errors.append(f"{fid}: decoded mesh had 0 faces")
             continue
 
         rng = np.random.default_rng(7)   # fixed: eval-to-eval comparability
@@ -204,6 +228,28 @@ def evaluate(model, pipeline, ds: SlatDataset, cfg: FlowDPOConfig, *,
         out["S"].append(s.total)
         watertight.append(1.0 if tm.is_watertight else 0.0)
         dispersion_feats.append(slat.feats.float().mean(0).cpu().numpy())
+
+        # Image fidelity: silhouette IoU between the sampled mesh and the
+        # conditioning image. Both are rendered by the same code with the same
+        # camera (elevation 20, azimuth 35, bounding-sphere fit), so their alpha
+        # masks are directly comparable. This is the guard against the failure
+        # where printability improves because the model stopped following the
+        # prompt -- a printability-only eval scores that as success.
+        try:
+            from . import render_mesh
+            from PIL import Image
+            ref_path = os.path.join(ds.root, "images", f"{fid}.png")
+            if os.path.exists(ref_path):
+                shot = render_mesh.render_views(tm, n_views=1, size=256,
+                                                elevation_deg=20.0, azimuth_deg=35.0)[0]
+                ref = Image.open(ref_path).convert("RGBA").resize((256, 256), Image.LANCZOS)
+                a = np.asarray(shot)[..., 3] > 8
+                b = np.asarray(ref)[..., 3] > 8
+                union = (a | b).sum()
+                if union:
+                    sims.append(float((a & b).sum()) / float(union))
+        except Exception as e:
+            errors.append(f"{fid}: fidelity {type(e).__name__}: {e}")
 
         if sample_dir and i < n_render:
             try:
@@ -219,7 +265,11 @@ def evaluate(model, pipeline, ds: SlatDataset, cfg: FlowDPOConfig, *,
 
     res = {k: (float(np.mean(v)) if v else None) for k, v in out.items()}
     res["watertight_rate"] = float(np.mean(watertight)) if watertight else None
+    res["image_similarity"] = float(np.mean(sims)) if sims else None
     res["n_eval"] = len(watertight)
+    if errors:
+        res["errors"] = errors[:6]
+        print(f"[eval] {len(errors)} sample(s) failed: {errors[0]}", flush=True)
     if len(dispersion_feats) > 1:
         D = np.stack(dispersion_feats)
         # Mean pairwise distance between per-sample latent means: collapses
@@ -289,11 +339,15 @@ def main(argv=None) -> int:
     t0 = time.time()
     pipeline = pipe_mod.load_pipeline(args.model_id, args.device)
     model = pipeline.models["shape_slat_flow_model_512"]
-    # pipeline.to(device) does not necessarily land the flow models on the
-    # device: under low_vram they are parked on CPU and moved in around each
-    # sampling call. Training holds the model resident, so place it once.
+    # Place the flow model on the device once and keep it there: training
+    # holds it resident, unlike inference which pages it in per sampling call.
     model.to(args.device)
-    pipeline.low_vram = False
+    # low_vram is deliberately LEFT ALONE. It is not just a memory hint --
+    # decode_shape_slat only moves the shape decoder onto the device when it is
+    # set, so clearing it strands the decoder on CPU and every eval dies with
+    # "Tensor for argument weight is on cpu but expected on mps". Nothing here
+    # calls sample_shape_slat (the one path that would page the flow model back
+    # to CPU), so the flow model stays put regardless.
     print(f"loaded in {time.time()-t0:.0f}s", flush=True)
 
     adapted = lora_mod.apply_lora(model, rank=args.rank, alpha=args.alpha)
