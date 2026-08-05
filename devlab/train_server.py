@@ -160,11 +160,18 @@ def api_log(run_id: str, tail: int = 400):
     with open(p, "rb") as f:
         # Seek from the end rather than reading the file: an overnight run's
         # log can reach hundreds of MB and the dashboard polls this.
+        # 64KB comfortably covers `tail` lines of this log's line length while
+        # costing a third of the disk read the dashboard used to do every 5s --
+        # which competes with the training/dataset process for IO.
         f.seek(0, os.SEEK_END)
         size = f.tell()
-        f.seek(max(0, size - 200_000))
+        window = min(size, max(16_384, tail * 200))
+        f.seek(size - window)
         data = f.read().decode("utf-8", "replace")
-    return {"lines": data.splitlines()[-tail:]}
+    lines = data.splitlines()
+    if window < size and lines:
+        lines = lines[1:]  # first line is probably truncated mid-way
+    return {"lines": lines[-tail:]}
 
 
 @app.get("/api/host")
