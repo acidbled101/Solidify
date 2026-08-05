@@ -135,6 +135,46 @@ def api_samples(run_id: str):
     return {"checkpoints": out}
 
 
+@app.get("/api/runs/{run_id}/progression")
+def api_progression(run_id: str):
+    """Samples indexed by OBJECT across checkpoints, not by checkpoint.
+
+    The gallery answers "what does the model produce now"; this answers "how
+    did this particular object change as training progressed", which is the
+    question you actually want during a fine-tune. Because eval renders every
+    checkpoint from a fixed camera and a fixed held-out set, the frames for one
+    object form a comparable sequence the UI can scrub.
+    """
+    d = _run_dir(run_id)
+    root = os.path.join(d, "samples")
+    by_object: Dict[str, Dict[int, str]] = {}
+    steps = set()
+    if os.path.isdir(root):
+        for step_dir in sorted(os.listdir(root)):
+            if not step_dir.startswith("step_"):
+                continue
+            try:
+                step = int(step_dir.replace("step_", ""))
+            except ValueError:
+                continue
+            p = os.path.join(root, step_dir)
+            if not os.path.isdir(p):
+                continue
+            for f in os.listdir(p):
+                if not f.lower().endswith((".png", ".jpg", ".webp")):
+                    continue
+                obj = os.path.splitext(f)[0]
+                by_object.setdefault(obj, {})[step] = f"{step_dir}/{f}"
+                steps.add(step)
+    # Only objects present at more than one checkpoint can show a progression.
+    usable = {k: v for k, v in by_object.items() if len(v) >= 1}
+    return {
+        "objects": sorted(usable.keys()),
+        "steps": sorted(steps),
+        "frames": usable,
+    }
+
+
 @app.get("/api/runs/{run_id}/samples/{step_dir}/{filename}")
 def api_sample_file(run_id: str, step_dir: str, filename: str):
     d = _run_dir(run_id)

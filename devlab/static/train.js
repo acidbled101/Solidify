@@ -32,7 +32,7 @@
 
 const COLORS = ['#4da3ff', '#3fbf7f', '#e0a33e', '#e5534b', '#b57bff', '#48c9d4'];
 
-const CADENCE = { metrics: 5000, log: 20000, gallery: 30000 };
+const CADENCE = { metrics: 5000, log: 20000, gallery: 30000, prog: 30000 };
 const MAX_DRAW_POINTS = 900;   // ~1 point per CSS pixel of chart width
 
 const state = {
@@ -49,6 +49,13 @@ const state = {
   dirty: false,
   drawQueued: false,
   mode: null,
+  baseline: null,      // step-0 eval with adapters disabled
+  logScale: false,
+  prog: null,          // {objects, steps, frames}
+  progObject: null,
+  progIdx: 0,
+  progTimer: null,
+  lastProg: 0,
   timer: null,
 };
 
@@ -135,8 +142,14 @@ function drawLines(canvas, series, opts = {}) {
   const line = css.getPropertyValue('--line').trim() || '#232b36';
   const muted = css.getPropertyValue('--muted').trim() || '#8b98a8';
 
-  const live = series
-    .map(s => ({ ...s, points: downsample((s.points || []).filter(p => Number.isFinite(p[1]))) }))
+  let prepared = series.map(s => ({ ...s, points: (s.points || []).filter(p => Number.isFinite(p[1])) }));
+  if (opts.log) {
+    // Flow-matching loss spans orders of magnitude across noise levels; a
+    // linear axis hides everything below the early spike.
+    prepared = prepared.map(s => ({ ...s, points: s.points.filter(p => p[1] > 0).map(p => [p[0], Math.log10(p[1])]) }));
+  }
+  const live = prepared
+    .map(s => ({ ...s, points: downsample(s.points) }))
     .filter(s => s.points.length);
 
   if (!live.length) {
@@ -165,11 +178,29 @@ function drawLines(canvas, series, opts = {}) {
   ctx.beginPath();
   for (const v of ticks) { const y = Y(v); ctx.moveTo(pad.l, y); ctx.lineTo(w - pad.r, y); }
   ctx.stroke();
-  const fy = opts.fmtY || ((v) => Math.abs(v) >= 1000 ? v.toLocaleString() : String(+v.toFixed(6)));
+  const fy = opts.fmtY || (opts.log
+    ? ((v) => Math.pow(10, v).toPrecision(2))
+    : ((v) => Math.abs(v) >= 1000 ? v.toLocaleString() : String(+v.toFixed(6))));
   for (const v of ticks) ctx.fillText(fy(v), 4, Y(v) + 3);
   ctx.fillText(String(Math.round(x0)), pad.l, h - 6);
   const lastLabel = String(Math.round(x1));
   ctx.fillText(lastLabel, w - pad.r - ctx.measureText(lastLabel).width, h - 6);
+
+  // Baseline reference lines. A printability curve without the base model's
+  // value on the same axes cannot tell you whether training helped.
+  if (opts.refs) {
+    ctx.save();
+    ctx.setLineDash([4, 4]);
+    ctx.lineWidth = 1.2;
+    for (const r of opts.refs) {
+      if (!Number.isFinite(r.value)) continue;
+      ctx.strokeStyle = r.color;
+      ctx.globalAlpha = 0.7;
+      const y = Y(r.value);
+      ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(w - pad.r, y); ctx.stroke();
+    }
+    ctx.restore();
+  }
 
   live.forEach((s, i) => {
     ctx.strokeStyle = s.color || COLORS[i % COLORS.length];
@@ -224,6 +255,7 @@ async function tick() {
       for (const rec of m.records) {
         if (rec.kind === 'train') state.train.push(rec);
         else if (rec.kind === 'eval') state.evals.push(rec);
+        else if (rec.kind === 'baseline') state.baseline = rec;
       }
       state.dirty = true;
     }
@@ -333,32 +365,73 @@ function render() {
 
   const ev = state.evals[state.evals.length - 1] || {};
   const prev = state.evals[state.evals.length - 2];
-  let heldoutSub = '';
-  let heldoutCls = '';
+  const base = state.baseline || {};
+  const delta = (k) => (ev[k] != null && base[k] != null) ? ev[k] - base[k] : null;
+
+  let heldoutSub = '', heldoutCls = '';
   if (prev && ev.heldout_loss != null && prev.heldout_loss != null) {
     const d = ev.heldout_loss - prev.heldout_loss;
     heldoutSub = `${d >= 0 ? '+' : ''}${d.toFixed(4)}`;
     heldoutCls = d > 0 ? 'up' : 'down';
   }
+  const thru = last.step_s ? (1 / last.step_s).toFixed(3) : null;
   statCards([
-    { label: 'Step', value: String(step ?? '—'), sub: status.eta_s ? `eta ${fmtDur(status.eta_s)}` : (total ? `of ${total}` : '') },
-    { label: 'Train loss', value: fmt(last.loss), sub: last.lr != null ? `lr ${last.lr.toExponential(1)}` : '' },
+    { label: 'Step', value: String(step ?? '—'), sub: total ? `of ${total}` : '' },
+    { label: 'Epoch', value: last.epoch != null ? last.epoch.toFixed(2) : '—',
+      sub: last.samples_seen != null ? `${last.samples_seen} samples` : '' },
+    { label: 'Train loss', value: fmt(last.loss_ema ?? last.loss), sub: 'ema' },
     { label: 'Held-out', value: fmt(ev.heldout_loss), sub: heldoutSub, cls: heldoutCls },
-    { label: 'Watertight', value: ev.watertight_rate != null ? `${(ev.watertight_rate * 100).toFixed(0)}%` : '—', sub: 'eval samples' },
-    { label: 'Elapsed', value: fmtDur(status.elapsed_s), sub: last.step_s ? `${last.step_s.toFixed(1)}s/step` : '' },
-    { label: 'Memory', value: last.mem_gb != null ? `${last.mem_gb.toFixed(1)} GB` : '—', sub: last.grad_norm != null ? `|g| ${fmt(last.grad_norm, 2)}` : '' },
+    { label: 'LR', value: last.lr != null ? last.lr.toExponential(1) : '—',
+      sub: last.grad_norm != null ? `|g| ${fmt(last.grad_norm, 2)}` : '' },
+    { label: 'Throughput', value: last.step_s ? `${last.step_s.toFixed(1)}s` : '—',
+      sub: thru ? `${thru} steps/s` : '' },
+    { label: 'Memory', value: last.mem_gb != null ? `${last.mem_gb.toFixed(1)} GB` : '—',
+      sub: last.mem_peak_gb != null ? `peak ${last.mem_peak_gb.toFixed(1)}` : '' },
+    { label: 'ETA', value: status.eta_s ? fmtDur(status.eta_s) : '—', sub: fmtDur(status.elapsed_s) + ' elapsed' },
   ]);
 
-  // Charts are the expensive part; skip entirely when no new records arrived.
+  // Baseline deltas. Lower is better for the three penalties; for watertight
+  // rate higher is better. R_Detail is a fidelity term, not a printability
+  // one, so it is reported without a better/worse verdict.
+  const chips = [
+    ['L_OH', -1], ['L_Th', -1], ['L_Topo', -1], ['watertight_rate', +1], ['R_Detail', 0],
+  ].map(([k, dir]) => {
+    const d = delta(k);
+    if (d == null) return '';
+    const cls = dir === 0 ? '' : ((d * dir > 0) ? 'better' : 'worse');
+    return `<span class="${cls}">${k} ${d >= 0 ? '+' : ''}${d.toFixed(4)} vs base</span>`;
+  }).filter(Boolean).join('');
+  const dEl = $('print-delta');
+  if (dEl && dEl.innerHTML !== chips) dEl.innerHTML = chips;
+
   if (state.dirty) {
     state.dirty = false;
     const lossPts = state.train.map(r => [r.step, r.loss]);
     const lossSeries = [
-      { label: 'train (raw)', points: lossPts, color: COLORS[0], alpha: 0.28, width: 1 },
-      { label: 'train (ema)', points: ema(lossPts.filter(p => Number.isFinite(p[1]))), color: COLORS[0] },
+      { label: 'train (raw)', points: lossPts, color: COLORS[0], alpha: 0.25, width: 1 },
+      { label: 'train (ema)', points: state.train.map(r => [r.step, r.loss_ema]), color: COLORS[0] },
       { label: 'held-out', points: state.evals.map(r => [r.step, r.heldout_loss]), color: COLORS[1] },
     ];
-    drawLines($('c-loss'), lossSeries, { key: 'loss' }); legend($('l-loss'), lossSeries);
+    drawLines($('c-loss'), lossSeries, { key: 'loss', log: state.logScale });
+    legend($('l-loss'), lossSeries);
+
+    const optimSeries = [
+      { label: 'grad norm', points: state.train.map(r => [r.step, r.grad_norm]), color: COLORS[2] },
+    ];
+    drawLines($('c-optim'), optimSeries, { key: 'optim' }); legend($('l-optim'), optimSeries);
+
+    // Loss by noise level, latest step that carried bins.
+    let binRec = null;
+    for (let i = state.train.length - 1; i >= 0 && !binRec; i--) {
+      if (Object.keys(state.train[i]).some(k => k.startsWith('t_bin_'))) binRec = state.train[i];
+    }
+    const binSeries = binRec ? [{
+      label: 'loss vs t (0=data, 1=noise)',
+      points: Array.from({ length: 10 }, (_, i) => [i / 10, binRec[`t_bin_${i}`]])
+                   .filter(p => Number.isFinite(p[1])),
+      color: COLORS[5],
+    }] : [{ label: '', points: [] }];
+    drawLines($('c-bins'), binSeries, { key: 'bins' }); legend($('l-bins'), binSeries);
 
     const P = (k) => state.evals.map(r => [r.step, r[k]]);
     const printSeries = [
@@ -366,9 +439,11 @@ function render() {
       { label: 'L_Th', points: P('L_Th'), color: COLORS[1] },
       { label: 'L_Topo', points: P('L_Topo'), color: COLORS[2] },
       { label: 'R_Detail', points: P('R_Detail'), color: COLORS[3] },
-      { label: 'watertight rate', points: P('watertight_rate'), color: COLORS[4] },
+      { label: 'watertight', points: P('watertight_rate'), color: COLORS[4] },
     ];
-    drawLines($('c-print'), printSeries, { key: 'print' }); legend($('l-print'), printSeries);
+    const refs = printSeries.map(x => ({ value: base[x.label === 'watertight' ? 'watertight_rate' : x.label], color: x.color }));
+    drawLines($('c-print'), printSeries, { key: 'print', refs });
+    legend($('l-print'), printSeries);
 
     const fidSeries = [
       { label: 'image similarity', points: P('image_similarity'), color: COLORS[0] },
@@ -377,8 +452,8 @@ function render() {
     drawLines($('c-fid'), fidSeries, { key: 'fid' }); legend($('l-fid'), fidSeries);
 
     const divSeries = [
-      { label: 'mode entropy', points: P('mode_entropy'), color: COLORS[1] },
-      { label: 'pairwise dist', points: P('sample_dispersion'), color: COLORS[4] },
+      { label: 'sample dispersion', points: P('sample_dispersion'), color: COLORS[1] },
+      { label: 'mode entropy', points: P('mode_entropy'), color: COLORS[4] },
     ];
     drawLines($('c-div'), divSeries, { key: 'div' }); legend($('l-div'), divSeries);
   }
@@ -402,6 +477,52 @@ async function refreshGallery() {
   $('gallery').innerHTML = latest.images.slice(0, 12).map(f =>
     `<figure><img loading="lazy" decoding="async" src="/api/runs/${state.runId}/samples/${latest.dir}/${f}">
      <figcaption>${f.replace(/\.(png|jpg|webp)$/i, '')}</figcaption></figure>`).join('');
+}
+
+async function refreshProgression() {
+  const r = await fetch(`/api/runs/${state.runId}/progression`).then(x => x.json()).catch(() => null);
+  if (!r || !r.objects.length) return;
+  const changed = !state.prog || state.prog.objects.length !== r.objects.length ||
+                  state.prog.steps.length !== r.steps.length;
+  state.prog = r;
+  if (!state.progObject || !r.objects.includes(state.progObject)) state.progObject = r.objects[0];
+
+  const sel = $('prog-object');
+  const html = r.objects.map(o => `<option value="${o}">${o}</option>`).join('');
+  if (sel.innerHTML !== html) { sel.innerHTML = html; sel.value = state.progObject; }
+
+  const frames = framesFor(state.progObject);
+  const slider = $('prog-slider');
+  const wasAtEnd = +slider.value >= +slider.max;
+  slider.max = String(Math.max(0, frames.length - 1));
+  // Follow the newest checkpoint only if the user was already there; don't
+  // yank the slider out from under someone inspecting an earlier step.
+  if (changed && wasAtEnd) state.progIdx = frames.length - 1;
+  state.progIdx = Math.min(state.progIdx, Math.max(0, frames.length - 1));
+  slider.value = String(state.progIdx);
+  showProgFrame();
+}
+
+function framesFor(obj) {
+  if (!state.prog || !obj) return [];
+  const m = state.prog.frames[obj] || {};
+  return Object.keys(m).map(Number).sort((a, b) => a - b).map(step => ({ step, path: m[step] }));
+}
+
+function showProgFrame() {
+  const frames = framesFor(state.progObject);
+  if (!frames.length) return;
+  const f = frames[Math.min(state.progIdx, frames.length - 1)];
+  const url = `/api/runs/${state.runId}/samples/${f.path}`;
+  const img = $('prog-img');
+  if (img.getAttribute('src') !== url) img.src = url;
+  setText($('prog-step'), `step ${f.step}`);
+  // Ghost = step 0 (the base model), when we have it.
+  const ghost = $('prog-ghost');
+  const zero = frames.find(x => x.step === 0);
+  const gurl = zero ? `/api/runs/${state.runId}/samples/${zero.path}` : '';
+  if (ghost.getAttribute('src') !== gurl) { if (gurl) ghost.src = gurl; else ghost.removeAttribute('src'); }
+  ghost.style.display = (zero && f.step !== 0) ? '' : 'none';
 }
 
 async function refreshLog() {
@@ -433,12 +554,31 @@ function wire() {
     state.runId = e.target.value;
     Object.assign(state, {
       offset: 0, train: [], evals: [], lastGalleryDir: null,
-      lastLogText: null, lastLog: 0, lastGallery: 0, dirty: true, mode: null,
+      lastLogText: null, lastLog: 0, lastGallery: 0, lastProg: 0, dirty: true,
+      mode: null, baseline: null, prog: null, progObject: null, progIdx: 0,
     });
     AXIS.clear();
     tick();
   };
-  $('refresh').onclick = () => { state.lastLog = 0; state.lastGallery = 0; tick(); };
+  $('refresh').onclick = () => { state.lastLog = 0; state.lastGallery = 0; state.lastProg = 0; tick(); };
+  $('loss-scale').onclick = (e) => {
+    state.logScale = !state.logScale;
+    e.target.classList.toggle('on', state.logScale);
+    AXIS.delete('loss'); redrawOnly();
+  };
+  $('prog-object').onchange = (e) => { state.progObject = e.target.value; state.progIdx = 0; refreshProgression(); };
+  $('prog-slider').oninput = (e) => { state.progIdx = +e.target.value; showProgFrame(); };
+  $('prog-play').onclick = () => {
+    if (state.progTimer) { clearInterval(state.progTimer); state.progTimer = null; $('prog-play').textContent = '▶'; return; }
+    $('prog-play').textContent = '❚❚';
+    state.progTimer = setInterval(() => {
+      const n = framesFor(state.progObject).length;
+      if (!n) return;
+      state.progIdx = (state.progIdx + 1) % n;
+      $('prog-slider').value = String(state.progIdx);
+      showProgFrame();
+    }, 700);
+  };
   $('b-apply').onclick = () => {
     const patch = {};
     const lr = $('k-lr').value.trim();

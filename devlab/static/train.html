@@ -15,7 +15,7 @@
     <span id="alive" class="pill">—</span>
   </div>
   <div class="bar-right">
-    <span id="step" class="mono">step —</span>
+    <span id="step" class="mono"></span>
     <button id="refresh" class="ghost" title="Refresh now">↻</button>
   </div>
 </header>
@@ -28,30 +28,72 @@
 
   <section class="cards" id="headline"></section>
 
+  <!-- ------------------------- TRAINING ------------------------- -->
+
   <section class="card" data-mode="train">
-    <h2>Loss</h2>
+    <h2>Loss <small>flow-matching MSE</small>
+      <button class="ghost tiny" id="loss-scale" title="Toggle log scale">log</button>
+    </h2>
     <canvas id="c-loss" height="200"></canvas>
     <div class="legend" id="l-loss"></div>
   </section>
 
+  <section class="grid2" data-mode="train">
+    <div class="card">
+      <h2>Learning rate &amp; gradient norm</h2>
+      <canvas id="c-optim" height="150"></canvas>
+      <div class="legend" id="l-optim"></div>
+    </div>
+    <div class="card">
+      <h2>Loss by noise level <small>t bins, latest</small></h2>
+      <canvas id="c-bins" height="150"></canvas>
+      <div class="legend" id="l-bins"></div>
+    </div>
+  </section>
+
   <section class="card" data-mode="train">
-    <h2>Printability on held-out samples <small>lower is better except R_Detail</small></h2>
-    <canvas id="c-print" height="200"></canvas>
+    <h2>Printability on held-out set
+      <small>dashed = base model before training</small></h2>
+    <canvas id="c-print" height="210"></canvas>
     <div class="legend" id="l-print"></div>
+    <div id="print-delta" class="deltas"></div>
   </section>
 
   <section class="grid2" data-mode="train">
     <div class="card">
-      <h2>Image fidelity <small>guards prompt-drift</small></h2>
-      <canvas id="c-fid" height="160"></canvas>
+      <h2>Fidelity <small>guards prompt-drift</small></h2>
+      <canvas id="c-fid" height="150"></canvas>
       <div class="legend" id="l-fid"></div>
     </div>
     <div class="card">
       <h2>Diversity <small>guards collapse</small></h2>
-      <canvas id="c-div" height="160"></canvas>
+      <canvas id="c-div" height="150"></canvas>
       <div class="legend" id="l-div"></div>
     </div>
   </section>
+
+  <!-- 3D sample progression -->
+  <section class="card" data-mode="train">
+    <h2>Sample evolution <small>same object, same camera, across checkpoints</small></h2>
+    <div class="prog-controls">
+      <select id="prog-object" aria-label="Object"></select>
+      <input id="prog-slider" type="range" min="0" max="0" value="0" step="1" aria-label="Checkpoint">
+      <span id="prog-step" class="mono"></span>
+      <button id="prog-play" class="ghost" title="Play">▶</button>
+    </div>
+    <div class="prog-stage">
+      <img id="prog-img" alt="sample at checkpoint">
+      <img id="prog-ghost" alt="" aria-hidden="true">
+    </div>
+    <p class="muted tiny-note">Ghost overlay shows the base model (step 0) for comparison.</p>
+  </section>
+
+  <section class="card" data-mode="train">
+    <h2>Latest samples</h2>
+    <div id="gallery" class="gallery"><p class="muted">No eval samples yet.</p></div>
+  </section>
+
+  <!-- ------------------------- DATASET ------------------------- -->
 
   <section class="card" data-mode="dataset">
     <h2>Latent size <small>voxels per model</small></h2>
@@ -65,10 +107,7 @@
     <div class="legend" id="l-secs"></div>
   </section>
 
-  <section class="card" data-mode="train">
-    <h2>Samples</h2>
-    <div id="gallery" class="gallery"><p class="muted">No eval samples yet.</p></div>
-  </section>
+  <!-- ------------------------- COMMON ------------------------- -->
 
   <section class="card" data-mode="train">
     <h2>Control <small>applied live, no restart</small></h2>
