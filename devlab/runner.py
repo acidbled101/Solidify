@@ -51,6 +51,13 @@ def parse_args():
     p.add_argument("--branch-noise-scale", type=float, default=0.02)
     p.add_argument("--continuation-steps", type=int, default=2)
     p.add_argument("--num-delta-grad-steps", type=int, default=3)
+    p.add_argument(
+        "--best-of-n", type=int, default=0,
+        help="Replace gradient steering with best-of-N rejection sampling: draw N "
+             "perturbations, decode and judge each, keep whichever the judge prefers. "
+             "0 (default) keeps the steering path. See DPOBranchConfig.best_of_n for "
+             "the compute-parity arithmetic.",
+    )
     p.add_argument("--dpo-beta", type=float, default=1.0)
     p.add_argument("--delta-max-norm-ratio", type=float, default=3.0)
     p.add_argument("--model-id", default="microsoft/TRELLIS.2-4B")
@@ -79,6 +86,7 @@ def main() -> int:
             "target_faces": args.target_faces,
             "model_id": args.model_id,
             "num_branches": args.num_branches,
+            "best_of_n": args.best_of_n,
             "vanilla_too": args.vanilla_too,
             "pid": os.getpid(),
         })
@@ -102,6 +110,7 @@ def main() -> int:
             branch_noise_scale=args.branch_noise_scale,
             continuation_steps=args.continuation_steps,
             num_delta_grad_steps=args.num_delta_grad_steps,
+            best_of_n=args.best_of_n,
             dpo_beta=args.dpo_beta,
             delta_max_norm_ratio=args.delta_max_norm_ratio,
             decode_resolution=int(args.pipeline_type),

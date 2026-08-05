@@ -141,6 +141,28 @@ runs = RunManager()
 app = FastAPI(title="DPO Inspector")
 
 
+@app.middleware("http")
+async def revalidate_static(request, call_next):
+    """Force revalidation of /static assets.
+
+    StaticFiles sends ETag + Last-Modified but no Cache-Control. With no
+    Cache-Control, browsers fall back to HEURISTIC caching -- they may reuse a
+    cached copy for a while without asking the server at all (WebKit is
+    especially eager). For a dev tool whose JS changes every few minutes that
+    is actively harmful: it produced a page where a freshly-added run_view.js
+    called into a stale charts.js and failed with "Can't find variable:
+    latentPath", which reads like a scoping bug and is not one.
+
+    "no-cache" does NOT mean "don't store" -- it means "revalidate before
+    use". The ETag still yields a 304 for unchanged files, so this costs one
+    conditional request per asset, not a re-download.
+    """
+    response = await call_next(request)
+    if request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+    return response
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -287,6 +309,19 @@ def list_runs():
             "error": error,
             "duration_seconds": (events[-1]["t"] - events[0]["t"]) if len(events) > 1 else 0.0,
             "n_events": len(events),
+            # Does this run carry the per-step latent/velocity telemetry
+            # (LatentProbe)? Runs predating that instrumentation have only
+            # t/t_prev on their sampler_step events, so the Concept Proof
+            # trajectory panel has nothing to draw and says so rather than
+            # inventing a path. Surfaced here so the UI can label each run and
+            # default to one that actually has something to show, instead of
+            # loading a blank panel and making the user hunt.
+            "has_latent_telemetry": any(
+                (e.get("payload") or {}).get("latent") for e in events
+                if e.get("type") == "sampler_step"
+            ),
+            "is_synthetic": "synthetic" in d.name.lower(),
+            "grad_step_count": sum(1 for e in events if e.get("type") == "grad_step"),
         })
     return {"runs": out}
 
@@ -397,6 +432,79 @@ def compare_runs(ids: str):
 @app.get("/")
 def index():
     return FileResponse(str(STATIC_DIR / "index.html"))
+
+
+@app.get("/concept")
+def concept_page():
+    return FileResponse(str(STATIC_DIR / "concept.html"))
+
+
+@app.get("/api/metrics")
+def metrics_all(rebuild: bool = True):
+    """Cross-run aggregate metrics, rebuilt from every trace on disk.
+
+    Rebuilt by default rather than served from the cached file: traces are
+    append-only and runs finish while the page is open, so a stale aggregate
+    is worse than a slightly slower request (it is a few ms per run).
+    """
+    from devlab import metrics as metrics_mod
+
+    data = metrics_mod.build(TRACES_DIR)
+    if rebuild:
+        try:
+            metrics_mod.write(data, TRACES_DIR)
+        except OSError as e:
+            data["summary"]["write_error"] = str(e)
+    return {"summary": data["summary"], "branch_rows": data["branch_rows"],
+            "runs": [{k: v for k, v in r.items() if k != "branches"} for r in data["runs"]]}
+
+
+@app.get("/api/real-mechanism")
+def real_mechanism_data():
+    """Panels M1-M4's data recomputed from REAL TRELLIS.2 traces.
+
+    Rebuilt per request for the same reason /api/metrics is: runs finish while
+    the page is open, and a stale mechanism panel is worse than a few ms of
+    recompute.
+    """
+    from devlab import real_mechanism as rm
+
+    return rm.build(TRACES_DIR)
+
+
+@app.get("/api/metrics/download/{name}")
+def metrics_download(name: str):
+    """Serve the generated metrics files for offline analysis."""
+    allowed = {"metrics.json", "metrics_runs.csv", "metrics_branches.csv"}
+    if name not in allowed:
+        raise HTTPException(404, f"unknown metrics file {name!r}; expected one of {sorted(allowed)}")
+    path = TRACES_DIR / name
+    if not path.exists():
+        from devlab import metrics as metrics_mod
+
+        metrics_mod.write(metrics_mod.build(TRACES_DIR), TRACES_DIR)
+    if not path.exists():
+        raise HTTPException(404, f"{name} could not be generated")
+    return FileResponse(str(path), filename=name,
+                        media_type="application/json" if name.endswith(".json") else "text/csv")
+
+
+@app.get("/api/concept")
+def concept_data():
+    """The alignment experiment's results, written by devlab/alignment_experiment.py.
+
+    Served rather than fetched directly from /static so a missing file gives a
+    404 with an actionable message instead of the frontend silently rendering
+    an empty page -- the file is generated, not checked in as a fixture.
+    """
+    path = STATIC_DIR / "concept_data.json"
+    if not path.exists():
+        raise HTTPException(
+            404,
+            "concept_data.json not found -- generate it with: "
+            "python devlab/alignment_experiment.py",
+        )
+    return FileResponse(str(path), media_type="application/json")
 
 
 # Mounted at /static (not /) to match every /static/... reference in

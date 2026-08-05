@@ -61,6 +61,10 @@ let rightShowing = "delta_initial"; // which candidate the right viewer pane sho
 let viewer = null;
 let currentSource = null; // active EventSource, if any
 let loadedMeshFile = { left: null, right: null };
+// Bumped by every loadRun() call, before its first await. A response that
+// resolves after a NEWER loadRun has started is stale and must be discarded
+// rather than applied -- see loadRun's own comment for the race this guards.
+let loadGeneration = 0;
 
 function ensureBranch(idx) {
   idx = idx ?? 0; // traces recorded before branch_index existed default to branch 0
@@ -494,32 +498,64 @@ function updateRunButtons(busyOverride) {
 // Run list (sidebar)
 // ---------------------------------------------------------------------------
 let didAutoLoad = false;
+let lastRunListSignature = null; // see the skip-if-unchanged check below
 async function refreshRunList() {
   try {
     const r = await fetch("/api/runs");
     const { runs } = await r.json();
     const list = document.getElementById("runList");
     if (!runs.length) { list.innerHTML = '<div class="empty-state">no runs yet</div>'; return; }
-    if (!didAutoLoad && !state.runId) {
-      // On first load (nothing selected yet), show the most recent run --
-      // matches the usual "come back and see what you were looking at" dev
-      // tool convention rather than an empty state you have to click past.
-      didAutoLoad = true;
-      loadRun(runs[0].run_id);
+    // Include state.runId in the signature (not just the fetched data) so the
+    // active-row highlight still updates right after a selection, even on a
+    // tick where /api/runs itself is unchanged.
+    const signature = JSON.stringify(runs) + "|" + state.runId;
+    if (signature === lastRunListSignature) {
+      // Skip the rebuild. This poll runs every 5s regardless of whether
+      // anything changed, and a full `innerHTML =` replace destroys and
+      // recreates every row's DOM node even when the content is identical.
+      // During a quiet session that meant a user's click could land on a
+      // node that gets torn out from under it mid-gesture purely from bad
+      // luck on the polling interval -- reproduced with a scripted click
+      // that timed out retrying against a node repeatedly replaced by this
+      // rebuild. A real single mouse click is fast enough that this was rare
+      // rather than routine, but it was a real, avoidable failure mode, not
+      // a theoretical one.
+    } else {
+      lastRunListSignature = signature;
+      renderRunListInto(list, runs);
     }
-    list.innerHTML = runs.map((run) => {
-      const statusClass = !run.finished ? "status-pending" : run.ok ? "status-ok" : "status-err";
-      const statusText = !run.finished ? "running…" : run.ok ? "done" : "error";
-      const mins = (run.duration_seconds / 60).toFixed(1);
-      return `<div class="run-item ${run.run_id === state.runId ? "active" : ""}" data-run-id="${run.run_id}">
-        <div class="rid">${run.run_id}</div>
-        <div>${run.image || "?"} · ${run.pipeline_type || "?"} · <span class="${statusClass}">${statusText}</span> · ${mins}m</div>
-      </div>`;
-    }).join("");
-    list.querySelectorAll(".run-item").forEach((elm) => {
-      elm.addEventListener("click", () => loadRun(elm.dataset.runId));
-    });
+    return maybeAutoLoad(runs);
   } catch (e) { /* ignore */ }
+}
+
+function maybeAutoLoad(runs) {
+  if (!didAutoLoad && !state.runId) {
+    // On first load (nothing selected yet), show the most recent run --
+    // matches the usual "come back and see what you were looking at" dev
+    // tool convention rather than an empty state you have to click past.
+    // A run named in ?run= or previously selected (possibly on the Concept
+    // Proof page) wins, so selection is shared in both directions.
+    didAutoLoad = true;
+    const params = new URLSearchParams(location.search);
+    const wanted = params.get("run") || localStorage.getItem("dpoInspector.selectedRun");
+    const known = runs.some((r) => r.run_id === wanted);
+    loadRun(known ? wanted : runs[0].run_id);
+  }
+}
+
+function renderRunListInto(list, runs) {
+  list.innerHTML = runs.map((run) => {
+    const statusClass = !run.finished ? "status-pending" : run.ok ? "status-ok" : "status-err";
+    const statusText = !run.finished ? "running…" : run.ok ? "done" : "error";
+    const mins = (run.duration_seconds / 60).toFixed(1);
+    return `<div class="run-item ${run.run_id === state.runId ? "active" : ""}" data-run-id="${run.run_id}">
+      <div class="rid">${run.run_id}</div>
+      <div>${run.image || "?"} · ${run.pipeline_type || "?"} · <span class="${statusClass}">${statusText}</span> · ${mins}m</div>
+    </div>`;
+  }).join("");
+  list.querySelectorAll(".run-item").forEach((elm) => {
+    elm.addEventListener("click", () => loadRun(elm.dataset.runId));
+  });
 }
 setInterval(refreshRunList, 5000);
 refreshRunList();
@@ -531,6 +567,15 @@ function resetForRun(runId) {
   if (currentSource) { currentSource.close(); currentSource = null; }
   state = freshState();
   state.runId = runId;
+  // Publish the selection so the Concept Proof page opens on the same run.
+  // localStorage (not just the URL) so the choice survives navigating between
+  // the two pages by clicking the header tabs, which carry no query string.
+  try {
+    localStorage.setItem("dpoInspector.selectedRun", runId);
+    history.replaceState(null, "", `?run=${encodeURIComponent(runId)}`);
+    const link = document.getElementById("conceptLink");
+    if (link) link.href = `/concept?run=${encodeURIComponent(runId)}`;
+  } catch (e) { /* private-mode localStorage, non-fatal */ }
   rightShowing = "delta_initial";
   loadedMeshFile = { left: null, right: null };
   if (!viewer) {
@@ -540,6 +585,19 @@ function resetForRun(runId) {
 }
 
 async function loadRun(runId) {
+  // Captured BEFORE any await, so two overlapping loadRun calls (a user
+  // clicking one run then quickly picking another) are strictly ordered even
+  // though their fetches can resolve out of order. `state` is a single
+  // module-level object mutated in place by applyEvent -- without this guard,
+  // a slow response for a run the user has since navigated away from lands
+  // late and silently overwrites whatever the CURRENT run's state now holds,
+  // one field at a time (its config, one branch's row, etc), while the
+  // sidebar still correctly shows the newer run as selected. That mismatch
+  // between "what's highlighted" and "what's displayed" is exactly what
+  // reproduced under a deterministic race test: selecting run B while run A's
+  // /api/trace was still in flight left the branches table showing run A's
+  // branch_t and scores in row 0 even though B was the active selection.
+  const myGeneration = ++loadGeneration;
   resetForRun(runId);
   // Replay everything already on disk, then attach live ONLY if the run is
   // still in flight. /api/stream always replays from byte 0 (that's what
@@ -550,18 +608,24 @@ async function loadRun(runId) {
   // zigzag with 2x the real point count instead of a clean decline).
   const r = await fetch(`/api/trace/${runId}`);
   const { events } = await r.json();
+  if (myGeneration !== loadGeneration) return; // superseded while this fetch was in flight
   events.forEach(applyEvent);
   render();
   const lastType = events.length ? events[events.length - 1].type : null;
   const isFinished = lastType === "session_end" || lastType === "error";
-  if (!isFinished) attachStream(runId);
+  if (!isFinished) attachStream(runId, myGeneration);
   refreshRunList();
 }
 
-function attachStream(runId) {
+function attachStream(runId, generation) {
   const es = new EventSource(`/api/stream/${runId}`);
   currentSource = es;
   es.onmessage = (e) => {
+    // Defense in depth: resetForRun() closes the previous EventSource
+    // synchronously when a new run is selected, which should stop further
+    // messages, but a message already handed to the browser's event queue
+    // before close() takes effect can still fire once more -- guard it too.
+    if (generation !== loadGeneration) { es.close(); return; }
     try {
       const evt = JSON.parse(e.data);
       applyEvent(evt);

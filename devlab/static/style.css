@@ -213,7 +213,7 @@ table.diag tr.branch-row.selected td { color: var(--text); background: var(--pan
 .chart-refline { stroke-dasharray: 3 3; stroke-width: 1; }
 .chart-reflabel { font: 9px var(--mono); }
 .chart-refline-v { stroke-dasharray: 3 3; stroke-width: 1.5; }
-.chart-ylabel { font: 9px var(--mono); fill: var(--text-faint); }
+.chart-ylabel { font: 9px var(--mono); fill: var(--text-faint); letter-spacing: .02em; }
 .rail-base { stroke: var(--line); stroke-width: 3; }
 .rail-done { stroke: var(--text-dim); stroke-width: 3; }
 .rail-branch-dot { fill: var(--text); }
@@ -222,3 +222,108 @@ table.diag tr.branch-row.selected td { color: var(--text); background: var(--pan
 ::-webkit-scrollbar { width: 9px; height: 9px; }
 ::-webkit-scrollbar-thumb { background: var(--line); border-radius: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
+
+/* ---- concept proof page -------------------------------------------------
+   Additions only; every colour comes from the tokens at the top of this file
+   so the two pages stay one tool rather than two. */
+nav.tabs { display: flex; gap: 2px; margin-left: auto; }
+nav.tabs a {
+  font-family: var(--mono); font-size: 11px; text-decoration: none;
+  color: var(--text-faint); padding: 4px 11px; border-radius: var(--radius);
+  border: 1px solid transparent;
+}
+nav.tabs a:hover { color: var(--text-dim); }
+nav.tabs a.active { color: var(--accent); border-color: var(--line); background: var(--panel-2); }
+header .health-pill { margin-left: 12px; }
+
+main.concept {
+  padding: 18px 22px 70px; display: flex; flex-direction: column; gap: 16px;
+  max-width: 1180px; margin: 0 auto; width: 100%;
+}
+
+.verdict-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 10px; }
+.verdict-card {
+  border: 1px solid var(--line); border-left-width: 3px; border-radius: var(--radius);
+  padding: 11px 13px; background: var(--panel-2); display: flex; flex-direction: column; gap: 5px;
+}
+.verdict-card .v-status {
+  font-family: var(--mono); font-size: 9.5px; text-transform: uppercase;
+  letter-spacing: 0.1em; font-weight: 700;
+}
+.verdict-card .v-claim { font-size: 12px; color: var(--text); font-weight: 600; line-height: 1.35; }
+.verdict-card .v-headline {
+  font-family: var(--mono); font-size: 12px; color: var(--text);
+  font-variant-numeric: tabular-nums; padding: 3px 0;
+}
+.verdict-card .v-detail { font-size: 11px; color: var(--text-dim); line-height: 1.5; }
+.verdict-card.confirmed { border-left-color: var(--good); }
+.verdict-card.confirmed .v-status { color: var(--good); }
+.verdict-card.refuted { border-left-color: var(--bad); }
+.verdict-card.refuted .v-status { color: var(--bad); }
+.verdict-card.partial { border-left-color: var(--warn); }
+.verdict-card.partial .v-status { color: var(--warn); }
+.verdict-card.untestable { border-left-color: var(--text-faint); }
+.verdict-card.untestable .v-status { color: var(--text-faint); }
+
+.callout {
+  margin-top: 10px; padding: 9px 12px; border-radius: var(--radius);
+  border: 1px solid var(--line); border-left: 3px solid var(--accent);
+  background: var(--panel-2); font-size: 11.5px; line-height: 1.55; color: var(--text-dim);
+}
+.callout.warn { border-left-color: var(--warn); }
+.callout strong { color: var(--text); }
+.callout code, .explain code { font-family: var(--mono); color: var(--warn); font-size: 11px; }
+.callout .dim { color: var(--text-faint); }
+
+.stat-row { display: flex; flex-wrap: wrap; gap: 8px 26px; margin-top: 10px; }
+.stat-row > div { display: flex; flex-direction: column; gap: 1px; }
+.stat-row .k {
+  font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-faint);
+}
+.stat-row .v {
+  font-family: var(--mono); font-size: 13px; color: var(--text); font-variant-numeric: tabular-nums;
+}
+
+main.concept .panel > .grid-2 > div > div { overflow-x: auto; }
+main.concept table.diag { display: block; overflow-x: auto; white-space: nowrap; }
+/* The provenance table holds prose, not figures -- nowrap truncates it. */
+#provenance table.diag { white-space: normal; }
+#provenance table.diag td:last-child { min-width: 380px; line-height: 1.5; }
+#provenance table.diag td:first-child { width: 190px; color: var(--text); }
+
+@media (max-width: 860px) {
+  main.concept .grid-2 { grid-template-columns: 1fr; }
+  nav.tabs { margin-left: 0; }
+}
+
+/* ---- run picker + step scrubber (concept page, run-specific half) -------- */
+.run-picker { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+.run-picker select {
+  background: var(--panel-2); border: 1px solid var(--line); color: var(--text);
+  border-radius: var(--radius); padding: 6px 9px; font-family: var(--mono); font-size: 12px;
+  min-width: 340px; max-width: 100%;
+}
+.run-picker select:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+.ghost-link { color: var(--text-dim); font-size: 11px; font-family: var(--mono); text-decoration: none; }
+.ghost-link:hover { color: var(--accent); }
+
+.scrubber { display: flex; align-items: center; gap: 14px; margin-bottom: 10px; flex-wrap: wrap; }
+.scrubber input[type="range"] {
+  flex: 1 1 320px; min-width: 220px; accent-color: var(--accent);
+  background: transparent; height: 22px;
+}
+.scrubber input[type="range"]:disabled { opacity: 0.35; }
+.scrub-readout {
+  font-family: var(--mono); font-size: 11.5px; color: var(--text-dim);
+  white-space: nowrap; font-variant-numeric: tabular-nums;
+}
+.scrub-readout .mono { color: var(--text); }
+.dim { color: var(--text-faint); }
+
+/* Marks a panel still backed by the TinyFlow toy rather than real TRELLIS.2
+   traces, so the distinction is visible at a glance rather than only in prose. */
+.sub.toy-badge {
+  color: var(--warn); border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--line));
+  border-radius: 999px; padding: 2px 9px; font-family: var(--mono); font-size: 10px;
+  text-transform: none; letter-spacing: 0.02em;
+}

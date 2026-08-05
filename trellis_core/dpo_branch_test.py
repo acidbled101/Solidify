@@ -619,6 +619,137 @@ def test_sparse_conv_backend_restores_env():
     print("  sparse_conv_backend: env var set inside, restored (incl. unset) outside")
 
 
+def test_latent_probe_is_deterministic_and_cannot_fake_separation():
+    """Stable basis, and a ONE-DIRECTIONAL distance guarantee.
+
+    Both matter for the Concept Proof trajectory panel:
+
+      * stable basis -- coordinates from different steps and different branches
+        of one run must share a frame or the drawn path is meaningless. A basis
+        that silently re-drew per call would still produce a plausible-looking
+        picture, which is the dangerous failure mode.
+
+      * the projection cannot INVENT separation. Each basis column is a unit
+        vector, so for any pair |p_i . d| <= ||d||, hence the 2-D projected
+        distance is at most sqrt(2)*||d||. Contrapositive: two branches that
+        are close in the full latent CANNOT look far apart on screen. That is
+        exactly the claim the panel makes.
+
+    The converse does NOT hold and is deliberately not asserted: two dimensions
+    cannot guarantee that everything far apart in ~22k dimensions looks far
+    apart here, so branches may look coincident while genuinely differing.
+    An earlier version of this test asserted a distance CORRELATION and failed
+    at 0.013 -- because independent high-dimensional Gaussians are all nearly
+    equidistant (concentration of measure), so the correlation was measuring
+    nothing. The UI copy was overclaiming in the same way and was corrected.
+    """
+    from trellis_core.dpo_branch import LatentProbe
+
+    torch.manual_seed(0)
+    probe = LatentProbe(seed=7)
+    x = torch.randn(300, 8)
+
+    a, b = probe(x), probe(x)
+    assert a["proj"] == b["proj"], "probe must be deterministic across calls"
+
+    fresh = LatentProbe(seed=7)
+    assert fresh(x)["proj"] == a["proj"], "same seed must give the same basis"
+    assert LatentProbe(seed=8)(x)["proj"] != a["proj"], "different seed must give a different basis"
+
+    # No-false-separation bound, on trajectory-like points (a base latent plus
+    # perturbations of varying size) -- the actual geometry of a branch step.
+    base = torch.randn(300, 8)
+    pts = [base + s * torch.randn(300, 8) for s in torch.linspace(0.0, 1.5, 20)]
+    projs = [torch.tensor(probe(p)["proj"]) for p in pts]
+    worst, ratios = 0.0, []
+    for i in range(len(pts)):
+        for j in range(i + 1, len(pts)):
+            full = float((pts[i] - pts[j]).norm())
+            proj = float((projs[i] - projs[j]).norm())
+            if full > 1e-9:
+                ratios.append(proj / full)
+                worst = max(worst, proj / full)
+    import math
+    assert worst <= math.sqrt(2) + 1e-5, f"projection expanded a distance by {worst:.4f} > sqrt(2)"
+
+    moved = probe(x + 0.5)
+    assert moved["proj"] != a["proj"], "shifting the latent must move its projection"
+    print(f"  deterministic + seed-stable; max distance expansion {worst:.4f} <= sqrt(2) "
+          f"(no invented separation), median contraction {sorted(ratios)[len(ratios)//2]:.4f}")
+
+
+def test_latent_probe_never_raises():
+    """Telemetry must not be able to kill a 12-minute generation run."""
+    from trellis_core.dpo_branch import LatentProbe
+
+    probe = LatentProbe(seed=0)
+
+    class Exploding:
+        @property
+        def feats(self):
+            raise RuntimeError("boom")
+
+    out = probe(Exploding())
+    assert "probe_error" in out, f"expected a captured error, got {out}"
+    assert "boom" in out["probe_error"]
+    # And a shape change must rebuild the basis rather than project through a stale one.
+    a = probe(torch.randn(10, 4))
+    b = probe(torch.randn(50, 4))
+    assert "proj" in a and "proj" in b
+    print("  a raising latent yields probe_error, not an exception; basis rebuilds on shape change")
+
+
+def test_score_detailed_degrades_like_rank():
+    """_score_detailed must degrade to (None, None), never raise or return NaN.
+
+    best_of_n calls it on the reference before any candidate exists to pair
+    against, and a decode failure there must fall through to "the first
+    candidate wins by default" rather than aborting a 20-minute generation.
+    """
+    import numpy as np
+    from trellis_core import geometric_judge as gj
+
+    assert dpo_branch._score_detailed(None, gj.JudgeWeights(), np.random.default_rng(0)) == (None, None)
+
+    class Exploding:
+        pass  # not a Trimesh -- score_mesh_detailed will raise on it
+
+    got = dpo_branch._score_detailed(Exploding(), gj.JudgeWeights(), np.random.default_rng(0))
+    assert got == (None, None), f"expected graceful (None, None), got {got}"
+
+    # a real mesh scores normally
+    import trimesh
+    mesh = trimesh.creation.icosphere(subdivisions=2, radius=0.3)
+    score, details = dpo_branch._score_detailed(mesh, gj.JudgeWeights(), np.random.default_rng(0))
+    assert score is not None and details is not None
+    assert math.isfinite(score.total)
+    print(f"  None/broken mesh -> (None, None); real mesh scores {score.total:.4f}")
+
+
+def test_best_of_n_config_is_off_by_default_and_documents_parity():
+    """best_of_n=0 must leave the steering path exactly as it was.
+
+    The whole point of the comparison is that turning this on is the ONLY
+    change; a default that silently altered steering would invalidate every
+    run already on disk.
+    """
+    cfg = dpo_branch.DPOBranchConfig()
+    assert cfg.best_of_n == 0, "best_of_n must default to off"
+
+    # Compute parity, asserted rather than only claimed in a comment:
+    # steering costs (3 + grad_steps) * k forwards; best-of-N costs (1 + N) * k.
+    k, grad_steps = cfg.continuation_steps, cfg.num_delta_grad_steps
+    steering_forwards = (3 + grad_steps) * k
+    n_for_parity = steering_forwards // k - 1
+    assert n_for_parity == 5, (
+        f"at the shipped defaults (k={k}, grad_steps={grad_steps}) best_of_n=5 should match "
+        f"steering's {steering_forwards} forwards, got N={n_for_parity}"
+    )
+    assert (1 + n_for_parity) * k == steering_forwards
+    print(f"  default off; at k={k}/grad={grad_steps}, steering={steering_forwards} forwards "
+          f"== best_of_n={n_for_parity} forwards (with 0 backward vs {grad_steps * k})")
+
+
 TESTS = [
     test_build_t_pairs,
     test_split_sampler_params,
@@ -637,6 +768,10 @@ TESTS = [
     test_sparse_conv_backend_restores_env,
     test_gradients_reach_delta_only,
     test_winner_and_loser_updates_are_opposed,
+    test_latent_probe_is_deterministic_and_cannot_fake_separation,
+    test_latent_probe_never_raises,
+    test_score_detailed_degrades_like_rank,
+    test_best_of_n_config_is_off_by_default_and_documents_parity,
 ]
 
 

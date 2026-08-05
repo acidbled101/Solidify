@@ -122,6 +122,7 @@ it's the most important one)
 """
 
 import contextlib
+import math
 import importlib
 import os
 from dataclasses import dataclass, field
@@ -240,6 +241,34 @@ class DPOBranchConfig:
     seed: Optional[int] = None
     num_branches: int = 1
     grad_checkpointing: bool = True
+    # best_of_n > 0 REPLACES gradient steering with plain rejection sampling:
+    # draw N independent perturbations, decode and judge each, keep whichever
+    # the judge actually prefers. 0 keeps the steering path.
+    #
+    # This exists because the steering path's own telemetry says its gradient
+    # is optimising the wrong thing. steer_delta ascends slat_detail_proxy (a
+    # stand-in for R_Detail ALONE, in latent space) using a preference label
+    # frozen before the first step -- and across every real branch on disk the
+    # proxy moved as instructed 15/17 times while its correlation with the
+    # judge's actual score change was r=+0.20 (n=17; |r|>0.48 needed for
+    # p<0.05). The optimiser works; its objective is nearly uncorrelated with
+    # the objective. Best-of-N drops the gradient and lets the judge -- the
+    # thing we actually care about -- select directly.
+    #
+    # Compute parity, so a comparison means something. Per fork, with
+    # k = continuation_steps:
+    #   steering:    (3 + num_delta_grad_steps) * k flow forwards,
+    #                num_delta_grad_steps * k of them carrying a backward pass,
+    #                and 3 decodes (reference, delta_initial, delta_final).
+    #   best_of_n:   (1 + N) * k flow forwards, ZERO backward passes,
+    #                and (1 + N) decodes.
+    # At the shipped defaults (k=2, grad steps=3) steering costs 12 forwards;
+    # best_of_n=5 costs the same 12 with no backward pass, no autograd graph,
+    # and therefore no need for grad_checkpointing or the slow conv_none
+    # backend. It does cost 6 decodes against steering's 3, and decoding is
+    # the expensive half -- so wall-clock parity is NOT expected at N=5, and
+    # the honest comparison is quality-per-decode as well as quality-per-run.
+    best_of_n: int = 0
 
     # The plan pins the branch point to this window; see Section III, Phase 2.
     T_BRANCH_MIN: float = 0.3
@@ -895,6 +924,65 @@ def backfill_sampler_defaults(sampler, inference_kwargs: Dict[str, Any]) -> Dict
     return filled
 
 
+class LatentProbe:
+    """Deterministic 2-D summary of a latent, so a trajectory can be traced.
+
+    The shape SLat is [n_voxels, channels] -- ~22k numbers at 2818 voxels. To
+    draw "where did the trajectory go, and where exactly did the fork diverge"
+    we need a couple of numbers per step that are (a) real, (b) comparable
+    across steps AND across branches of the same run, (c) cheap enough to take
+    every step.
+
+    A fixed random linear projection gives all three. By Johnson-Lindenstrauss
+    a random projection approximately preserves pairwise distances, so two
+    branches that visibly separate in the plot genuinely separated in the full
+    latent space -- the picture is not decorative.
+
+    The basis is drawn ONCE per run from a fixed seed and reused for every step
+    and every branch. Re-drawing it would make coordinates incomparable between
+    steps and the path meaningless. It is keyed on feature count so a run whose
+    voxel count changes mid-flight rebuilds rather than silently projecting
+    through a stale basis.
+
+    Deliberately no PCA: PCA would need the whole trajectory up front (so it
+    could not stream), and its axes would rotate between runs, making two runs
+    incomparable. A seeded random basis is stable across runs with the same
+    latent shape.
+    """
+
+    def __init__(self, seed: int = 0):
+        self.seed = seed
+        self._basis: Optional[torch.Tensor] = None
+
+    def _ensure_basis(self, n_features: int) -> torch.Tensor:
+        if self._basis is None or self._basis.shape[0] != n_features:
+            g = torch.Generator(device="cpu").manual_seed(self.seed)
+            basis = torch.randn(n_features, 2, generator=g)
+            self._basis = basis / basis.norm(dim=0, keepdim=True).clamp_min(1e-12)
+        return self._basis
+
+    def __call__(self, x, velocity=None) -> dict:
+        """Probe a latent (SparseTensor or dense). Never raises: telemetry must
+        not be able to kill a 12-minute generation run."""
+        try:
+            feats = x.feats if hasattr(x, "feats") else x
+            f = feats.detach().float().reshape(-1).cpu()
+            basis = self._ensure_basis(f.numel())
+            out = {
+                "rms": float(f.pow(2).mean().sqrt()),
+                "absmax": float(f.abs().max()),
+                "proj": [float(v) for v in (f @ basis)],
+            }
+            if velocity is not None:
+                v = velocity.feats if hasattr(velocity, "feats") else velocity
+                vf = v.detach().float().reshape(-1)
+                out["v_rms"] = float(vf.pow(2).mean().sqrt())
+                out["v_absmax"] = float(vf.abs().max())
+            return out
+        except Exception as e:  # pragma: no cover - telemetry is never load-bearing
+            return {"probe_error": f"{type(e).__name__}: {e}"}
+
+
 def differentiable_continuation(
     sampler,
     model,
@@ -902,6 +990,7 @@ def differentiable_continuation(
     t_pairs: Sequence[Tuple[float, float]],
     cond=None,
     enable_grad: bool = True,
+    on_step: Optional[Callable[[int, float, float, Any, Any], None]] = None,
     **inference_kwargs,
 ):
     """Euler-step forward under ambient grad, returning (x_final, pred_x_0_final).
@@ -925,15 +1014,27 @@ def differentiable_continuation(
     `enable_grad=False` runs the identical arithmetic under no_grad -- used for
     the reference branch and for the final re-run, where the graph would be
     dead weight in unified memory.
+
+    `on_step(index, t, t_prev, x_after, pred_v)`, if given, is called after each
+    Euler step with the real state and the real predicted velocity. This is the
+    only place inside the fork where both are in hand, so it is what lets
+    devlab/ trace where the reference and delta branches actually diverge
+    rather than inferring it from the scores afterwards. Exceptions are
+    swallowed: tracing must never be able to abort a run.
     """
     pred_x_0 = None
     ctx = torch.enable_grad() if enable_grad else torch.no_grad()
     with ctx:
-        for t, t_prev in t_pairs:
+        for i, (t, t_prev) in enumerate(t_pairs):
             pred_x_0, _pred_eps, pred_v = sampler._get_model_prediction(
                 model, x_t, t, cond, **inference_kwargs
             )
             x_t = x_t - (t - t_prev) * pred_v
+            if on_step is not None:
+                try:
+                    on_step(i, t, t_prev, x_t, pred_v)
+                except Exception as e:  # pragma: no cover
+                    print(f"[dpo_branch] differentiable_continuation on_step raised: {e}")
     return x_t, pred_x_0
 
 
@@ -986,6 +1087,26 @@ def _denormalize(slat, normalization: Optional[dict]):
     std = torch.tensor(normalization["std"])[None].to(slat.device)
     mean = torch.tensor(normalization["mean"])[None].to(slat.device)
     return slat * std + mean
+
+
+def _score_detailed(mesh, weights, rng):
+    """Score ONE mesh, degrading to (None, None) exactly like _rank does.
+
+    best_of_n needs a standalone score for the reference before any candidate
+    exists to pair it against; every other scoring path in this module is
+    pairwise. Non-finite scores degrade to None rather than propagating a NaN
+    into a comparison, matching _rank_detailed's own contract.
+    """
+    if mesh is None:
+        return None, None
+    try:
+        score, details = geometric_judge.score_mesh_detailed(mesh, weights, rng)
+    except Exception as e:  # pragma: no cover - a broken mesh must not abort a run
+        print(f"[dpo_branch] scoring failed, treating as unscored: {e}")
+        return None, None
+    if score is None or not math.isfinite(score.total):
+        return None, details
+    return score, details
 
 
 def _rank(mesh_a, mesh_b, weights, rng):
@@ -1185,6 +1306,12 @@ def sample_shape_slat_with_dpo_branch(
     def _proxy(slat) -> torch.Tensor:
         return slat_detail_proxy(_denormalize(slat, normalization).feats, neighbor_src, neighbor_tgt)
 
+    # One probe for the whole run: a single fixed basis, so every step and every
+    # branch below lands in the same 2-D coordinate system and the resulting
+    # path is actually comparable. Seeded off the run's own seed so two runs of
+    # the same seed produce identical coordinates.
+    probe = LatentProbe(seed=int(cfg.seed) if getattr(cfg, "seed", None) is not None else 0)
+
     branch_reports: List[DPOBranchReport] = []
     cursor = 0
     n_windows = len(windows)
@@ -1198,8 +1325,20 @@ def sample_shape_slat_with_dpo_branch(
             desc=f"Sampling shape SLat (pre-branch {branch_idx + 1}/{n_windows})",
             disable=not cfg.verbose,
         )):
+            x_before = x
             x = sampler.sample_once(flow_model, x, t, t_prev, cond_tensor, **inference_kwargs).pred_x_prev
-            _emit("sampler_step", phase="pre_branch", branch_index=branch_idx, index=step_idx, t=t, t_prev=t_prev)
+            # v is recovered exactly, not estimated: the Euler update IS
+            # x_prev = x - (t - t_prev) * v, so dividing the increment by the
+            # timestep returns the velocity the model actually predicted.
+            dt = (t - t_prev)
+            v_est = None
+            if abs(dt) > 1e-12:
+                try:
+                    v_est = (x_before.feats - x.feats) / dt if hasattr(x, "feats") else (x_before - x) / dt
+                except Exception:
+                    v_est = None
+            _emit("sampler_step", phase="pre_branch", branch_index=branch_idx,
+                  index=step_idx, t=t, t_prev=t_prev, latent=probe(x, v_est))
 
         branch_t = t_pairs[i_branch][0]
         cont_pairs = t_pairs[i_branch : i_branch + k]
@@ -1226,13 +1365,26 @@ def sample_shape_slat_with_dpo_branch(
 
         x_branch = x.detach()
         base_feats = x_branch.feats.detach()
+        # The fork's own coordinates: every branch path below starts from
+        # exactly this point, so the UI can anchor the split.
+        _emit("branch_latent", branch_index=branch_idx, which="fork", index=-1,
+              t=branch_t, latent=probe(x_branch))
 
-        def _continue(delta_tensor, enable_grad: bool = True):
+        def _branch_tracer(which: str):
+            """on_step hook that records one branch's real path through the fork."""
+            def _hook(i, t, t_prev, x_after, pred_v):
+                _emit("branch_latent", branch_index=branch_idx, which=which,
+                      index=i, t=t, t_prev=t_prev, latent=probe(x_after, pred_v))
+            return _hook
+
+        def _continue(delta_tensor, enable_grad: bool = True, trace_as: Optional[str] = None):
             """One (optionally differentiable) continuation from this fork's branch point."""
             branched = x_branch.replace(base_feats + delta_tensor)
             return differentiable_continuation(
                 sampler, flow_model, branched, cont_pairs, cond_tensor,
-                enable_grad=enable_grad, **inference_kwargs,
+                enable_grad=enable_grad,
+                on_step=_branch_tracer(trace_as) if trace_as else None,
+                **inference_kwargs,
             )
 
         # ---- Phase 2b: fork two candidates -----------------------------------
@@ -1245,6 +1397,11 @@ def sample_shape_slat_with_dpo_branch(
         # multiple forks don't repeat the same perturbation.
         eps_b = torch.randn(base_feats.shape, generator=generator).to(base_feats.device) * cfg.branch_noise_scale
         delta = eps_b.clone().to(base_feats.dtype).requires_grad_(True)
+        _emit("branch_perturbation", branch_index=branch_idx,
+              eps_rms=float(eps_b.detach().float().pow(2).mean().sqrt()),
+              base_rms=float(base_feats.detach().float().pow(2).mean().sqrt()),
+              relative=float(eps_b.detach().float().pow(2).mean().sqrt()
+                             / base_feats.detach().float().pow(2).mean().sqrt().clamp_min(1e-12)))
 
         with frozen_parameters(flow_model):
             assert not any(p.requires_grad for p in flow_model.parameters()), \
@@ -1255,132 +1412,296 @@ def sample_shape_slat_with_dpo_branch(
             # tensors back for the price of another k flow-model forwards.
             x_ref, pred_x0_ref = differentiable_continuation(
                 sampler, flow_model, x_branch, cont_pairs, cond_tensor,
-                enable_grad=False, **inference_kwargs,
+                enable_grad=False, on_step=_branch_tracer("reference"), **inference_kwargs,
             )
             proxy_ref = _proxy(pred_x0_ref).detach()
 
-            # No grad here: this first candidate exists only to be decoded and
-            # judged, and a k-step autograd graph we never backward through would
-            # sit in unified memory for the whole (expensive) decode.
-            _x_b, pred_x0_b = _continue(delta.detach(), enable_grad=False)
-
-            # ---- Phase 3: decode + judge (both non-differentiable) -----------
-            if pipeline.low_vram:
-                # Free the flow model from the device before the decoder lands on
-                # it -- the plan's unified-memory risk row.
-                flow_model.cpu()
-            mesh_ref = _decode_candidate(pipeline, pred_x0_ref, normalization, cfg.decode_resolution)
-            mesh_delta = _decode_candidate(pipeline, pred_x0_b, normalization, cfg.decode_resolution)
-            if pipeline.low_vram:
-                flow_model.to(device)
-
-            delta_won, score_ref, score_delta, cmp_ref, cmp_delta, details_ref, details_delta = _rank_detailed(
-                mesh_ref, mesh_delta, cfg.judge_weights, rng,
-            )
-            _emit("candidate_scored", branch_index=branch_idx, which="reference", mesh=mesh_ref, score=score_ref, cmp=cmp_ref, details=details_ref)
-            _emit("candidate_scored", branch_index=branch_idx, which="delta_initial", mesh=mesh_delta, score=score_delta, cmp=cmp_delta, details=details_delta)
-            decode_ok = mesh_ref is not None and mesh_delta is not None
-            if not decode_ok:
-                branch_notes.append(
-                    "a candidate failed to decode (empty mesh) -- skipping gradient "
-                    "steering entirely (there is no information to steer with) and "
-                    "falling back to whichever branch decoded, reference if neither did."
-                )
-            del mesh_delta
-
-            if cfg.verbose:
-                print(
-                    f"[dpo_branch] branch {branch_idx + 1}/{n_windows} t={branch_t:.3f}  "
-                    f"judge preferred {'delta' if delta_won else 'reference'} branch  "
-                    f"(S_ref={None if score_ref is None else round(score_ref.total, 4)}, "
-                    f"S_delta={None if score_delta is None else round(score_delta.total, 4)})"
-                )
-
-            # Whatever the two no-grad candidate decodes above left cached
-            # should be handed back to the allocator BEFORE the differentiable
-            # segment right below -- that segment is the single most memory-
-            # hungry part of the whole branch step (see _release_mps_cache's
-            # docstring), and is exactly where real OOMs were observed on this
-            # hardware before this call existed.
-            _release_mps_cache()
-
-            if not decode_ok:
-                loss_history, proxy_history, rms_history = [], [], []
-                delta_won_final, score_delta_final = delta_won, score_delta
-                # `delta_won` (from _rank, above) is already the right signal:
-                # _rank returns False when BOTH mesh_ref and mesh_delta are None,
-                # True when only mesh_ref is None (reference failed, delta
-                # decoded). Using `mesh_ref is None` directly here instead can't
-                # tell "reference failed" apart from "both failed" (mesh_delta is
-                # already deleted above by this point either way) -- with both
-                # failed it would evaluate True and resume from the random,
-                # unvalidated delta branch while still reporting "reference".
-                fallback_is_delta = delta_won
-                x = (_x_b if fallback_is_delta else x_ref).detach()
-                details_delta_final = None  # no gradient steering ran; there is no "final" candidate distinct from the initial one
-                del _x_b, pred_x0_b, pred_x0_ref, x_ref, mesh_ref
-            else:
-                del _x_b, pred_x0_b, pred_x0_ref
-
-                def _on_grad_step(step_idx: int, loss: float, proxy: float, rms: float) -> None:
-                    _emit(
-                        "grad_step", branch_index=branch_idx, step=step_idx, loss=loss, proxy=proxy, rms=rms,
-                        proxy_reference=float(proxy_ref),
-                    )
-
-                # sparse_conv_backend is a generator-based context manager --
-                # cannot be reused across multiple `with` statements, so a
-                # fresh instance is built for every fork rather than hoisted
-                # above this loop. Scoped ONLY around steer_delta: the single
-                # call in this function that runs .backward(). Everything else
-                # here (both initial continuations, both decodes) is
-                # enable_grad=False / no_grad, so forcing the slower conv
-                # backend for them would cost real decode time for zero benefit.
-                backend_ctx = sparse_conv_backend("none") if cfg.force_conv_none else contextlib.nullcontext()
-                # checkpointed_blocks is scoped to exactly the same region and
-                # for the same reason: this is the only call that builds an
-                # autograd graph through the flow model, and without
-                # checkpointing that graph alone is ~38GB (see its docstring).
-                with backend_ctx, checkpointed_blocks(flow_model, cfg.grad_checkpointing):
-                    loss_history, proxy_history, rms_history = steer_delta(
-                        delta,
-                        lambda d: _proxy(_continue(d)[1]),
-                        proxy_ref,
-                        delta_won,
-                        beta=cfg.dpo_beta,
-                        num_steps=int(cfg.num_delta_grad_steps),
-                        lr=cfg.effective_delta_lr(),
-                        max_rms=cfg.branch_noise_scale * cfg.delta_max_norm_ratio,
-                        on_step=_on_grad_step,
-                    )
-
-                # ---- pick the state to resume from ------------------------------
-                # The gradient steps moved delta, so the optimized branch is a NEW
-                # candidate the judge has not seen. Re-run the continuation once
-                # (no grad), decode it, and re-rank against the reference mesh we
-                # already have, so we always resume from a state the judge
-                # actually prefers -- "extract the final mesh from the winning
-                # trajectory", Phase 4.1.
-                x_final_delta, pred_x0_final = _continue(delta.detach(), enable_grad=False)
-
+            if cfg.best_of_n > 0:
+                # ---- Best-of-N: no gradient, judge selects directly ----------
+                # A running tournament rather than "score all N then argmax":
+                # it reuses _rank_detailed, which carries the thickness-fairness
+                # adjustment (an unmeasurable L_Th must not win by default), and
+                # it holds at most two meshes at once instead of N+1 -- decoded
+                # meshes are the largest objects in this whole step.
                 if pipeline.low_vram:
                     flow_model.cpu()
-                mesh_delta_final = _decode_candidate(pipeline, pred_x0_final, normalization, cfg.decode_resolution)
+                champion_mesh = _decode_candidate(pipeline, pred_x0_ref, normalization, cfg.decode_resolution)
                 if pipeline.low_vram:
                     flow_model.to(device)
 
-                (
-                    delta_won_final, _score_ref_final, score_delta_final,
-                    _cmp_ref_final, _cmp_delta_final, _details_ref_final, details_delta_final,
-                ) = _rank_detailed(mesh_ref, mesh_delta_final, cfg.judge_weights, rng)
-                _emit(
-                    "candidate_scored", branch_index=branch_idx, which="delta_final", mesh=mesh_delta_final,
-                    score=score_delta_final, cmp=_cmp_delta_final, details=details_delta_final,
-                )
-                del mesh_ref, mesh_delta_final
+                # The reference is deliberately NOT scored standalone here. The
+                # judge scores a PAIR under common random numbers (see
+                # geometric_judge.rank_candidates: the shared rng makes the two
+                # thickness ray-casts a paired comparison, "meaningfully reduces
+                # variance when the two branches are near-identical, which is
+                # the expected case"). Calling _score_detailed on the reference
+                # first would consume from that rng, so candidate 0 would be
+                # scored at a different stream position than the steering path
+                # scores it -- which measurably broke the controlled comparison
+                # on the first attempt at this run: the same perturbation scored
+                # 0.2614 under steering and 0.2571 here, a 0.0043 gap that is
+                # the same order as the effects being measured. So the reference
+                # score is taken from the FIRST pairwise ranking instead, exactly
+                # as the steering path takes it.
+                champion_x = x_ref
+                champion_score = None
+                champion_label = "reference"
+                score_ref = None
+                ref_emitted = False
+                first_cand_score = None
+                first_cand_won = False
+                n_evaluated = 0
+                # Pre-bound so the DPOBranchReport below can always be built,
+                # even on the paths where no pairing ever happens (reference
+                # failed to decode, or every candidate did). An earlier version
+                # left these unbound and crashed the whole generation in the
+                # report constructor AFTER fork 0 had already succeeded.
+                cmp_ref = cmp_delta = None
+                details_ref = details_delta = None
 
-                x = (x_final_delta if delta_won_final else x_ref).detach()
-                del x_final_delta, x_ref, pred_x0_final
+                for cand_i in range(int(cfg.best_of_n)):
+                    # Candidate 0 reuses the delta already drawn above, so a
+                    # best_of_n run and a steering run starting from the same
+                    # seed share their first perturbation exactly -- making the
+                    # two directly comparable rather than merely similar.
+                    if cand_i == 0:
+                        eps_i = delta.detach()
+                    else:
+                        eps_i = (torch.randn(base_feats.shape, generator=generator)
+                                 .to(base_feats.device) * cfg.branch_noise_scale).to(base_feats.dtype)
+                    x_i, pred_x0_i = _continue(
+                        eps_i, enable_grad=False,
+                        trace_as="delta_initial" if cand_i == 0 else None,
+                    )
+                    if pipeline.low_vram:
+                        flow_model.cpu()
+                    mesh_i = _decode_candidate(pipeline, pred_x0_i, normalization, cfg.decode_resolution)
+                    if pipeline.low_vram:
+                        flow_model.to(device)
+                    n_evaluated += 1
+
+                    if mesh_i is None:
+                        _emit("bon_candidate", branch_index=branch_idx, index=cand_i,
+                              decoded=False, won=False)
+                        del x_i, pred_x0_i
+                        _release_mps_cache()
+                        continue
+
+                    if champion_mesh is None:
+                        # Nothing to compare against yet -- this candidate takes
+                        # the crown by default (the reference failed to decode).
+                        cand_wins = True
+                        cand_score, cand_details = _score_detailed(mesh_i, cfg.judge_weights, rng)
+                        cmp_champ = cmp_cand = None
+                    else:
+                        (cand_wins, s_champ, cand_score, cmp_champ, cmp_cand,
+                         d_champ, cand_details) = _rank_detailed(
+                            champion_mesh, mesh_i, cfg.judge_weights, rng)
+                        # The reference's own score comes out of this first
+                        # paired ranking (common random numbers with candidate
+                        # 0), never from a separate pre-scoring pass -- see the
+                        # note above the loop.
+                        if not ref_emitted:
+                            score_ref, champion_score = s_champ, s_champ
+                            # The report wants the reference's comparison value
+                            # and details too; this first pairing is the only
+                            # place they exist, so capture rather than recompute
+                            # (recomputing would consume the shared rng again
+                            # and reintroduce exactly the CRN drift fixed above).
+                            cmp_ref, details_ref = cmp_champ, d_champ
+                            _emit("candidate_scored", branch_index=branch_idx, which="reference",
+                                  mesh=champion_mesh, score=s_champ, cmp=cmp_champ, details=d_champ)
+                            ref_emitted = True
+
+                    if cand_i == 0:
+                        first_cand_score, first_cand_won = cand_score, bool(cand_wins)
+                        cmp_delta, details_delta = cmp_cand, cand_details
+                        _emit("candidate_scored", branch_index=branch_idx, which="delta_initial",
+                              mesh=mesh_i, score=cand_score, cmp=cmp_cand, details=cand_details)
+                    _emit("bon_candidate", branch_index=branch_idx, index=cand_i, decoded=True,
+                          won=bool(cand_wins),
+                          score=None if cand_score is None else cand_score.total,
+                          cmp=cmp_cand, beat=champion_label)
+
+                    if cand_wins:
+                        del champion_mesh
+                        champion_mesh, champion_score = mesh_i, cand_score
+                        champion_x, champion_label = x_i, f"candidate_{cand_i}"
+                        del pred_x0_i
+                    else:
+                        del mesh_i, x_i, pred_x0_i
+                    _release_mps_cache()
+
+                if not ref_emitted:
+                    # Every candidate failed to decode, so the reference was
+                    # never paired with anything. Score it standalone now --
+                    # there is no CRN partner left to preserve, and a run must
+                    # still report what the reference was worth.
+                    score_ref, _ref_details = _score_detailed(champion_mesh, cfg.judge_weights, rng)
+                    champion_score = score_ref
+                    _emit("candidate_scored", branch_index=branch_idx, which="reference",
+                          mesh=champion_mesh, score=score_ref,
+                          cmp=None if score_ref is None else score_ref.total,
+                          details=_ref_details)
+                    branch_notes.append(
+                        f"best_of_n: none of the {int(cfg.best_of_n)} candidates decoded; "
+                        "resumed from the reference."
+                    )
+
+                resumed_from_candidate = champion_label != "reference"
+                _emit("candidate_scored", branch_index=branch_idx, which="delta_final",
+                      mesh=champion_mesh, score=champion_score,
+                      cmp=None if champion_score is None else champion_score.total,
+                      details=None)
+                if cfg.verbose:
+                    print(f"[dpo_branch] branch {branch_idx + 1}/{n_windows} best-of-"
+                          f"{cfg.best_of_n}: evaluated {n_evaluated}, winner={champion_label} "
+                          f"(S={None if champion_score is None else round(champion_score.total, 4)})")
+                branch_notes.append(
+                    f"best_of_n={cfg.best_of_n}: gradient steering disabled; the judge "
+                    f"selected directly among {n_evaluated} perturbations plus the "
+                    f"reference. Winner: {champion_label}."
+                )
+
+                # Feed the same report fields the steering path produces, so
+                # every downstream consumer (report, trace, devlab UI, metrics)
+                # keeps working unchanged. Histories are empty because there is
+                # no gradient -- that absence is the point, not missing data.
+                delta_won, delta_won_final = first_cand_won, resumed_from_candidate
+                score_delta, score_delta_final = first_cand_score, champion_score
+                details_delta_final = None
+                loss_history, proxy_history, rms_history = [], [], []
+                x = champion_x.detach()
+                del champion_mesh, champion_x, x_ref, pred_x0_ref
+                _release_mps_cache()
+                decode_ok = True
+                skip_steering = True
+            else:
+                skip_steering = False
+
+            if not skip_steering:
+                # No grad here: this first candidate exists only to be decoded and
+                # judged, and a k-step autograd graph we never backward through would
+                # sit in unified memory for the whole (expensive) decode.
+                _x_b, pred_x0_b = _continue(delta.detach(), enable_grad=False, trace_as="delta_initial")
+
+                # ---- Phase 3: decode + judge (both non-differentiable) -----------
+                if pipeline.low_vram:
+                    # Free the flow model from the device before the decoder lands on
+                    # it -- the plan's unified-memory risk row.
+                    flow_model.cpu()
+                mesh_ref = _decode_candidate(pipeline, pred_x0_ref, normalization, cfg.decode_resolution)
+                mesh_delta = _decode_candidate(pipeline, pred_x0_b, normalization, cfg.decode_resolution)
+                if pipeline.low_vram:
+                    flow_model.to(device)
+
+                delta_won, score_ref, score_delta, cmp_ref, cmp_delta, details_ref, details_delta = _rank_detailed(
+                    mesh_ref, mesh_delta, cfg.judge_weights, rng,
+                )
+                _emit("candidate_scored", branch_index=branch_idx, which="reference", mesh=mesh_ref, score=score_ref, cmp=cmp_ref, details=details_ref)
+                _emit("candidate_scored", branch_index=branch_idx, which="delta_initial", mesh=mesh_delta, score=score_delta, cmp=cmp_delta, details=details_delta)
+                decode_ok = mesh_ref is not None and mesh_delta is not None
+                if not decode_ok:
+                    branch_notes.append(
+                        "a candidate failed to decode (empty mesh) -- skipping gradient "
+                        "steering entirely (there is no information to steer with) and "
+                        "falling back to whichever branch decoded, reference if neither did."
+                    )
+                del mesh_delta
+
+                if cfg.verbose:
+                    print(
+                        f"[dpo_branch] branch {branch_idx + 1}/{n_windows} t={branch_t:.3f}  "
+                        f"judge preferred {'delta' if delta_won else 'reference'} branch  "
+                        f"(S_ref={None if score_ref is None else round(score_ref.total, 4)}, "
+                        f"S_delta={None if score_delta is None else round(score_delta.total, 4)})"
+                    )
+
+                # Whatever the two no-grad candidate decodes above left cached
+                # should be handed back to the allocator BEFORE the differentiable
+                # segment right below -- that segment is the single most memory-
+                # hungry part of the whole branch step (see _release_mps_cache's
+                # docstring), and is exactly where real OOMs were observed on this
+                # hardware before this call existed.
+                _release_mps_cache()
+
+                if not decode_ok:
+                    loss_history, proxy_history, rms_history = [], [], []
+                    delta_won_final, score_delta_final = delta_won, score_delta
+                    # `delta_won` (from _rank, above) is already the right signal:
+                    # _rank returns False when BOTH mesh_ref and mesh_delta are None,
+                    # True when only mesh_ref is None (reference failed, delta
+                    # decoded). Using `mesh_ref is None` directly here instead can't
+                    # tell "reference failed" apart from "both failed" (mesh_delta is
+                    # already deleted above by this point either way) -- with both
+                    # failed it would evaluate True and resume from the random,
+                    # unvalidated delta branch while still reporting "reference".
+                    fallback_is_delta = delta_won
+                    x = (_x_b if fallback_is_delta else x_ref).detach()
+                    details_delta_final = None  # no gradient steering ran; there is no "final" candidate distinct from the initial one
+                    del _x_b, pred_x0_b, pred_x0_ref, x_ref, mesh_ref
+                else:
+                    del _x_b, pred_x0_b, pred_x0_ref
+
+                    def _on_grad_step(step_idx: int, loss: float, proxy: float, rms: float) -> None:
+                        _emit(
+                            "grad_step", branch_index=branch_idx, step=step_idx, loss=loss, proxy=proxy, rms=rms,
+                            proxy_reference=float(proxy_ref),
+                        )
+
+                    # sparse_conv_backend is a generator-based context manager --
+                    # cannot be reused across multiple `with` statements, so a
+                    # fresh instance is built for every fork rather than hoisted
+                    # above this loop. Scoped ONLY around steer_delta: the single
+                    # call in this function that runs .backward(). Everything else
+                    # here (both initial continuations, both decodes) is
+                    # enable_grad=False / no_grad, so forcing the slower conv
+                    # backend for them would cost real decode time for zero benefit.
+                    backend_ctx = sparse_conv_backend("none") if cfg.force_conv_none else contextlib.nullcontext()
+                    # checkpointed_blocks is scoped to exactly the same region and
+                    # for the same reason: this is the only call that builds an
+                    # autograd graph through the flow model, and without
+                    # checkpointing that graph alone is ~38GB (see its docstring).
+                    with backend_ctx, checkpointed_blocks(flow_model, cfg.grad_checkpointing):
+                        loss_history, proxy_history, rms_history = steer_delta(
+                            delta,
+                            lambda d: _proxy(_continue(d)[1]),
+                            proxy_ref,
+                            delta_won,
+                            beta=cfg.dpo_beta,
+                            num_steps=int(cfg.num_delta_grad_steps),
+                            lr=cfg.effective_delta_lr(),
+                            max_rms=cfg.branch_noise_scale * cfg.delta_max_norm_ratio,
+                            on_step=_on_grad_step,
+                        )
+
+                    # ---- pick the state to resume from ------------------------------
+                    # The gradient steps moved delta, so the optimized branch is a NEW
+                    # candidate the judge has not seen. Re-run the continuation once
+                    # (no grad), decode it, and re-rank against the reference mesh we
+                    # already have, so we always resume from a state the judge
+                    # actually prefers -- "extract the final mesh from the winning
+                    # trajectory", Phase 4.1.
+                    x_final_delta, pred_x0_final = _continue(delta.detach(), enable_grad=False, trace_as="delta_final")
+
+                    if pipeline.low_vram:
+                        flow_model.cpu()
+                    mesh_delta_final = _decode_candidate(pipeline, pred_x0_final, normalization, cfg.decode_resolution)
+                    if pipeline.low_vram:
+                        flow_model.to(device)
+
+                    (
+                        delta_won_final, _score_ref_final, score_delta_final,
+                        _cmp_ref_final, _cmp_delta_final, _details_ref_final, details_delta_final,
+                    ) = _rank_detailed(mesh_ref, mesh_delta_final, cfg.judge_weights, rng)
+                    _emit(
+                        "candidate_scored", branch_index=branch_idx, which="delta_final", mesh=mesh_delta_final,
+                        score=score_delta_final, cmp=_cmp_delta_final, details=details_delta_final,
+                    )
+                    del mesh_ref, mesh_delta_final
+
+                    x = (x_final_delta if delta_won_final else x_ref).detach()
+                    del x_final_delta, x_ref, pred_x0_final
 
         _emit("resume", branch_index=branch_idx, resumed_from=("delta" if delta_won_final else "reference"), resume_t=resume_t)
         if cfg.verbose:
@@ -1434,8 +1755,17 @@ def sample_shape_slat_with_dpo_branch(
     for step_idx, (t, t_prev) in enumerate(tqdm(
         t_pairs[cursor:], desc="Sampling shape SLat (post-branch)", disable=not cfg.verbose
     )):
+        x_before = x
         x = sampler.sample_once(flow_model, x, t, t_prev, cond_tensor, **inference_kwargs).pred_x_prev
-        _emit("sampler_step", phase="post_branch", branch_index=max(n_windows - 1, 0), index=step_idx, t=t, t_prev=t_prev)
+        dt = (t - t_prev)
+        v_est = None
+        if abs(dt) > 1e-12:
+            try:
+                v_est = (x_before.feats - x.feats) / dt if hasattr(x, "feats") else (x_before - x) / dt
+            except Exception:
+                v_est = None
+        _emit("sampler_step", phase="post_branch", branch_index=max(n_windows - 1, 0),
+              index=step_idx, t=t, t_prev=t_prev, latent=probe(x, v_est))
 
     if pipeline.low_vram:
         flow_model.cpu()
