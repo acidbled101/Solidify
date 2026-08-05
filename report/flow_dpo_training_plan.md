@@ -1,256 +1,207 @@
-# Project plan — weight-space DPO for TRELLIS.2 shape generation
+# Weight-space DPO — what to train, and the proof of concept
 
-**Supersedes:** `3D_PRINTING_AWARE_PIPELINE.md` and the inference-time steering
-approach retired in `experiment_retrospective.md`.
-**Objective function:** already written and tested —
-`trellis_core/flow_dpo_objective.py`.
-
----
-
-## 1. Goal
-
-Fine-tune TRELLIS.2's shape flow model so that its *default* output is more
-printable, using a preference dataset labelled by the geometric judge. Not
-inference-time steering: real weight updates, a frozen reference model, and an
-offline dataset.
-
-**Success is defined once, up front:** on held-out conditioning images, the
-tuned model beats best-of-N sampling from the base model **at matched inference
-compute**, measured by a held-out physical printability metric that was never
-part of the training reward. Anything less is a null result, and the plan below
-is built so a null result arrives early and cheaply.
-
-## 2. Why this is a different bet
-
-The retired approach failed for one structural reason: the gradient came from a
-differentiable proxy for the judge, and that proxy's within-fork agreement with
-the judge was 5.9% against a 33% chance line. Weight-space DPO removes the proxy
-entirely — the judge runs offline, produces labels, and never needs a gradient.
-The gradient comes from the model's own flow-matching objective, differenced
-against a frozen reference.
-
-| | Retired approach | This plan |
-|---|---|---|
-| Optimised | a latent perturbation, discarded per fork | model weights, persisted |
-| Gradient source | `slat_detail_proxy` (agreement 5.9%) | flow-matching error vs. frozen reference |
-| Judge must be | differentiable-adjacent | offline and non-differentiable |
-| Judge noise | corrupts every gradient step | filtered out at dataset-build time |
-| Optimisation horizon | 3 SGD steps per fork | thousands of steps over a dataset |
-| Cost | at inference, every generation | once at training; inference unchanged |
-
-## 3. Phases and gates
-
-Each phase ends in a gate with a number. **If a gate fails, stop and re-plan —
-do not proceed on hope.** The retired project's central mistake was building
-three layers on an unvalidated reward.
+**Objective function:** `trellis_core/flow_dpo_objective.py` (written, smoke-tested).
+**Purpose of this document:** decide, using only this Mac, whether renting a
+bigger machine is justified.
 
 ---
 
-### Phase 0 — Preserve and reset (½ day)
+## 1. What to train
 
-1. Commit and push everything on `physics-aware-pipeline` (see
-   `experiment_retrospective.md` §8). Nothing since 2026-07-31 exists anywhere
-   else, including all 22 trace directories.
-2. Branch `flow-dpo-training` from it.
-3. Keep: `geometric_judge.py`, `printability_proxy.py`, `flow_dpo.py`,
-   `flow_dpo_objective.py`, `devlab/`, and `dpo_branch.py`'s **best-of-N path**
-   (it is the baseline this project must beat).
-4. Delete the steering path: `slat_detail_proxy`, `steer_delta`,
-   `preference_loss`, `project_delta_`, and the fork/resume machinery.
+**Target:** `slat_flow_img2shape_dit_1_3B_512` — the 512 non-cascade shape SLat
+flow model. 1.3B parameters, 2.41 GB in bf16.
 
-**Gate 0:** `origin/flow-dpo-training` contains every trace directory.
+**Method:** LoRA, not a full fine-tune.
 
----
+**Everything else stays frozen**: the SLat VAE, both decoders, the texture
+models, and the sparse-structure model. This matters more than it sounds — the
+**shape decoder is not needed during a training step at all**. It only runs
+offline while building the dataset. A training step is two forward/backward
+passes through a 2.41 GB model, nothing else.
 
-### Phase 1 — Repair the judge (2–3 days, no GPU)
+Why the 512 non-cascade path: the default `1024_cascade` has two shape flow
+models with an upsample between them, so training one lets the other undo it.
+Settle that later; it is not a proof-of-concept question.
 
-The judge is the dataset's only source of truth. Two measured defects make it
-unfit as-is.
+**Memory on a 36 GB Mac:**
 
-1. **Determinism.** `thickness_penalty`'s ray-cast sampler gives within-fork
-   `ΔL_Th` a test-retest reliability of **0.208**. Seed it from a mesh hash, or
-   switch to deterministic every-k-th-face sampling. The other three terms are
-   already exact — this one sampler is the entire noise floor.
-2. **Support awareness.** `overhang_penalty` is normal-only: ~5% of what it
-   measures genuinely needs support, ~67% is build-plate contact, and its rank
-   correlation with true unsupported area is **−0.432**. Add a downward raycast
-   ("is there material beneath?"); bed-exclusion alone is not enough (r=+0.31).
-3. Re-run the existing 8 judge tests plus new determinism tests.
+| | |
+|---|---|
+| base weights (bf16, frozen) | 2.41 GB |
+| LoRA adapter + Adam state (rank 16) | < 0.5 GB |
+| reference model | **0 GB** — precompute `v_ref` offline and pass it in |
+| activations, 2 checkpointed fwd/bwd | the binding term; `checkpointed_blocks` already handles it |
 
-**Gate 1**, on the ~70 real meshes already on disk — no new GPU time:
-- `ΔL_Th` test-retest reliability **≥ 0.90** (from 0.208)
-- Spearman(`L_OH_judge`, `L_OH_truly_unsupported`) **≥ +0.70** (from −0.432)
+Backward through this exact model on MPS is already demonstrated — the retired
+steering loop ran it with `SPARSE_CONV_BACKEND=none` plus checkpointing. The
+one untested difference is that gradients now flow to *weights* rather than to
+a latent, which adds optimizer state but no new activation memory. With LoRA
+that state is under half a gigabyte.
 
-Failing this, every later phase trains on coin flips. This phase is not optional
-and it is cheap.
+## 2. What is actually in doubt
 
----
+Not the plumbing. Two things:
 
-### Phase 2 — Variance pre-flight (1 day, ~4 h GPU)
+1. **Is there any headroom?** DPO can only push the model toward the better tail
+   of what it already samples. Its ceiling is the **within-coords spread** of
+   the target metric. The retired experiment measured `sd(ΔL_OH) = 0.00145`
+   within a fork against a population `std(L_OH) = 0.0602` across real meshes —
+   if that ratio holds, a *perfect* ranker moves overhang by ~2% of its
+   population spread, and no amount of GPU fixes that.
+2. **Can training capture the headroom that exists, at a data scale we can
+   afford?** Diffusion-DPO used ~10⁵ pairs. We will have ~10².
 
-**The decisive question: is the shape-SLat flow model even the right model to
-train?**
+The PoC answers both, in that order, cheapest first.
 
-TRELLIS.2 samples voxel coordinates from a *separate* sparse-structure flow
-model, then the SLat model fills features onto those coords. DPO requires the
-winner and loser to share a coordinate set (`assert_pairable`), so the dataset
-must fix coords per condition — which means **any printability variance carried
-by the coarse voxel structure is outside the reach of SLat training.**
+## 3. The design: measure headroom, then use a positive control
 
-Overhang and wall thickness are substantially properties of gross shape. If most
-of S's variance lives between coordinate sets, we would be training the wrong
-model, exactly as the retired project ascended the wrong proxy.
+The mistake to avoid is testing the method and the hardest target at the same
+time. If DPO-on-printability fails, you cannot tell whether the method doesn't
+work or whether printability was unlearnable — and that ambiguity is exactly
+what wasted the last experiment.
 
-Protocol:
-1. Pick 6 conditioning images.
-2. For each: sample **1** structure → 8 SLat candidates on those fixed coords →
-   decode → judge. Gives `std_within`.
-3. For each: sample **8** independent structures → 1 SLat each → decode → judge.
-   Gives `std_between`.
-4. Report the variance decomposition, per condition and pooled. Use within-group
-   paired deltas, never a pooled correlation — the retired project measured a
-   *perfect* within-fork ranker scoring 0.180 on a pooled metric while raw vertex
-   count scored 0.959.
+So: **train on the easiest real axis first.** `R_Detail` is the positive
+control. It is one of the judge's own four terms, it is exact and deterministic
+(no repair needed), and it has **24× more within-fork variance** than overhang
+(`sd(ΔR_Detail) = 0.035` vs `0.00145`). If DPO cannot move `R_Detail` on this
+pipeline, it certainly cannot move overhang, and the answer is no.
 
-**Gate 2:** `std_within² / (std_within² + std_between²) ≥ 0.40`.
+If it *can*, you get a measured extraction efficiency, multiply by the measured
+headroom for the real axis, and you have a number to make the rental decision
+with instead of an intuition.
 
-- **Pass** → train the shape-SLat flow model as planned.
-- **Fail** → the target is the **sparse-structure flow model** instead. That is
-  a *better* problem: it operates on a dense 3D tensor, so there is no shared-
-  support constraint at all, the model is smaller, and the objective in
-  `flow_dpo_objective.py` applies unchanged with `sample_index=None`.
+**The bar, stated as one sentence:** a single sample from the tuned model should
+recover a meaningful fraction of the gap between one base sample and
+best-of-6 from the base model. That is what "the model learned the preference"
+means operationally — the selection got distilled into the weights.
 
-Either outcome is a good outcome. This is the cheapest decision-relevant
-measurement in the project — do it before building any dataset.
+## 4. Steps
 
----
+### Step 0 — Wire it up (½ day, minimal GPU)
 
-### Phase 3 — Dataset builder (3–4 days + generation time)
+LoRA onto the shape flow model; one training step on 2 synthetic pairs; confirm
+loss decreases and `reward_acc` moves. Purely a plumbing check.
 
-`devlab/dataset_builder.py`. For each conditioning image:
+**Pass:** a gradient step completes on MPS without OOM, and `margin` widens on a
+fixed draw.
 
-1. Sample the structure stage **once**; freeze `coords`.
-2. Sample N=8 SLat candidates on those coords, varying only the SLat noise.
-3. Decode and judge all N under common random numbers.
-4. Emit pairs, **storing latents in normalized space** (`normalize_slat` — the
-   pipeline de-normalizes after sampling; getting this wrong silently rescales
-   every error term).
-5. **Filter by score gap.** This is DreamDPO's τ, relocated from the loss to the
-   dataset. Drop pairs whose |ΔS| is inside the judge's own repaired noise band;
-   pass the surviving gap through as `pair_weight`.
-6. Cache reference velocities: fix K=4 `(t, ε)` draws per pair, run the frozen
-   model once, store `v_ref`. This removes an entire model copy and two forward
-   passes from every training step — the single biggest memory win available.
+### Step 1 — Headroom (4–6 GPU-hours) — **this step alone can end the project**
 
-**Compute is the binding constraint.** Measured on this Mac from
-`devlab/traces/metrics.json`: a vanilla 512/12-step run takes **921–1290 s**
-(n=2), branched runs 518–3640 s (median 1071 s, n=10). At 15 min/candidate, 200
-conditions × 8 candidates is **~400 GPU-hours**. Mitigations, in order:
+No training. For 6 conditioning images:
 
-- Per-candidate cost on shared coords is only SLat-sample + decode + judge, not
-  a full pipeline run. **Measure this split first** — it sets the real budget.
-- **Batch candidates.** Shared coords means identical token count, so N
-  candidates may batch into one forward. Potentially an N× win; prototype it
-  before committing to a serial generation run.
-- Develop and validate the whole pipeline at 20 conditions × 4 candidates on the
-  Mac, then generate the real dataset on rented CUDA. A 400-hour serial job on
-  a machine that also has a GPU watchdog is not a good plan.
+1. Sample the structure stage once; freeze `coords`.
+2. Sample 8 SLat candidates on those coords; decode; score all four judge terms.
+3. Report, per axis, the within-coords spread against the population spread from
+   the ~70 real meshes already on disk.
+4. Separately: 8 independent structure samples, 1 SLat each — the between-coords
+   spread.
 
-**Gate 3:**
-- ≥ 1000 surviving pairs (be realistic: Diffusion-DPO used ~10⁵ Pick-a-Pic
-  pairs — we are firmly in the small-data regime, which is why Phase 4 uses
-  LoRA and why the success criterion in §1 is a measurable shift, not a
-  transformation)
-- **Label reproducibility ≥ 0.90**: re-judge a held-out 10% with fresh seeds;
-  the same candidate must win. This is Gate 1 re-tested end-to-end on the
-  actual data.
+**Also record the per-candidate wall-clock on shared coords.** A full 512/12-step
+run measured 921–1290 s, but candidates sharing coords skip structure sampling
+and post-processing. This number sets every budget below, so measure it before
+planning around it.
 
----
+**Gate 1a — is there anything to learn?**
+`sd_within(R_Detail) ≥ 0.15 × std_population(R_Detail)`.
+Below that, preference learning on this stage has no room, full stop.
 
-### Phase 4 — Training (3–4 days)
+**Gate 1b — is the SLat model the right stage?**
+`sd_within² / (sd_within² + sd_between²) ≥ 0.40`.
+If it fails, the printability signal lives in the voxel structure, and the
+target becomes the **sparse-structure flow model** (`ss_flow_img_dit_1_3B_64`,
+also 1.3B) — a *better* problem: dense 64³ tensor, no shared-support
+constraint, and `flow_dpo_objective.py` works unchanged with
+`sample_index=None`. Re-run Step 1 against that model and continue.
 
-`trellis_core/flow_dpo_train.py`, using `flow_dpo_objective.flow_dpo_loss`.
+### Step 2 — Small dataset (~1–2 nights of GPU)
 
-- **LoRA on the flow model**, not a full fine-tune. Small dataset, 36 GB
-  ceiling, and it makes the reference model free (base weights *are* the
-  reference — drop the LoRA adapter to get `v_ref`).
-- Batch size 1 + gradient accumulation; reuse `checkpointed_blocks` and force
-  `SPARSE_CONV_BACKEND=none` around the backward.
-- `sft_weight > 0`. The DPO objective is invariant to degrading both branches
-  as long as the loser degrades faster; this repo has already measured that
-  failure (reward rising while L_Th degraded 7.4×, all 3000 samples collapsing
-  to one geometry — **under the reference-based objective**, so the KL anchor
-  does not save you).
-- Sweep `β` first (O(2e3–5e3) for mean-reduced errors). It is the one
-  hyperparameter that matters.
-- **Never early-stop on the reward.** Held-out physical metric only.
-- Log every step: `reward_acc`, `margin`, and both raw flow-matching errors.
-  If `err_theta_w` rises while `margin` widens, the model is hacking the
-  difference — stop and raise `sft_weight`.
+30 conditions × 6 candidates on fixed coords ≈ 180 candidates. From each
+condition take the best/worst pair on `R_Detail` plus one mid pair → ~60–90
+pairs. Hold out 8 conditions entirely.
 
-**Gate 4:** on held-out pairs, implicit-reward accuracy **> 0.65**, with the
-winner's raw flow-matching error no worse than the reference's.
+- Store latents **normalized** (`normalize_slat`) — the pipeline de-normalizes
+  after sampling, and getting this wrong silently rescales every error term.
+- Fix 4 `(t, ε)` draws per pair and cache `v_ref`. This is what keeps the
+  reference model off the device.
 
----
+**Pass:** ≥ 60 pairs, and re-scoring a held-out 10% with fresh seeds picks the
+same winner ≥ 90% of the time. (`R_Detail` is deterministic, so this should be
+100%; if it isn't, something upstream is nondeterministic and must be found
+before training.)
 
-### Phase 5 — Evaluation (2 days)
+### Step 3 — Train (3–8 GPU-hours)
 
-The bar from §1, adapted from `devlab/metrics.py`:
+LoRA rank 16, batch 1 + accumulation, `sft_weight > 0`, sweep `β` over
+{1e3, 5e3, 2e4}.
 
-1. Held-out conditioning images, never used in training.
-2. Three arms at **matched inference compute**: base model 1 sample, base model
-   best-of-N (N chosen for parity), tuned model 1 sample.
-3. Score with the repaired judge **and** with a physical metric held out of the
-   training reward entirely (slicer support volume is the honest choice).
-4. Paired comparisons per condition, not pooled — §4 of the retrospective.
-5. Report distributional health too: mode entropy and out-of-box rate. The 2-D
-   experiment collapsed to a single geometry while its reward tripled.
+Run the **overfit check first**: train on 10 pairs only and confirm train
+`reward_acc → 1.0`. If the model cannot overfit 10 pairs, stop — that is a bug,
+not a data-scale problem, and no larger machine fixes it.
 
-**Gate 5:** tuned model beats base best-of-N on the held-out physical metric,
-with distributional diversity not collapsed.
+Log `reward_acc`, `margin`, and both raw flow-matching errors every step. If
+`err_theta_w` rises while `margin` widens, the model is exploiting the
+difference rather than learning the preference — raise `sft_weight`.
+
+**Pass:** held-out `reward_acc > 0.65`, winner's raw flow-matching error no
+worse than the reference's.
+
+### Step 4 — The decision measurement (~1 night of GPU)
+
+On the 8 held-out conditions, three arms:
+
+- base model, 1 sample
+- base model, best-of-6 (the baseline the whole approach must beat)
+- tuned model, 1 sample
+
+Score `R_Detail`, paired per condition — never pooled. The retired experiment
+measured a *perfect* within-fork ranker scoring 0.180 on a pooled metric while
+raw vertex count scored 0.959; pooled numbers here are worthless.
+
+Also record mode diversity and out-of-box rate: the 2-D experiment tripled its
+reward while collapsing all 3000 samples onto a single geometry.
 
 ---
 
-### Phase 6 — Iterate on-policy (optional)
+## 5. The gate that justifies renting a machine
 
-DPO degrades off-policy. If Phase 5 passes, regenerate candidates from the
-*tuned* model and repeat Phases 3–5. Two or three rounds; stop when the
-held-out metric plateaus.
+```
+capture = (tuned_1sample − base_1sample) / (base_bestof6 − base_1sample)
+```
 
-## 4. Risks
+**Go** if all three hold on held-out conditions:
 
-| Risk | Why it might happen | Mitigation |
-|---|---|---|
-| **Gate 2 fails** | Printability may live mostly in the voxel structure | Pivot to the sparse-structure flow model — cheaper and better-posed. Plan explicitly accommodates this. |
-| **Too few pairs** | Generation is ~400 GPU-hours at full scale | LoRA + low rank; batch candidates on shared coords; rent CUDA for the dataset |
-| **Reward hacking** | Documented in this repo's own 2-D run | `sft_weight`, early stop on held-out physical metric, log both raw errors |
-| **CFG mismatch** | Preferences collected under CFG-tilted sampling; loss is over the raw conditional | Collect pairs at cfg=1, or measure the gap and state it |
-| **Cascade ambiguity** | Default `1024_cascade` has two shape flow models; training one lets the other undo it | Develop on the 512 non-cascade path; decide LR vs HR explicitly before scaling |
-| **MPS backward gaps** | `mtlgemm` has no reliable registered backward | `conv_none` around backward — already solved and tested |
-| **Judge repair changes the target** | Gate 1 alters what "printable" means | Re-baseline all historical numbers after Phase 1; do not compare across the repair |
+- `capture ≥ 0.50` — one tuned sample recovers at least half of what best-of-6
+  selection buys
+- held-out `reward_acc > 0.65`
+- diversity not collapsed (mode entropy within 20% of base)
 
-## 5. Explicitly not doing
+Then extrapolate before spending anything:
 
-- Inference-time steering, latent perturbation, mid-ODE forking.
-- Any differentiable proxy for the judge. `printability_proxy.py` stays in the
-  tree as a *direct physics loss* option — the honest alternative if DPO fails —
-  but it is not part of this plan's critical path.
-- Training the SLat VAE, the decoder, or the texture pipeline. All frozen.
-- Texture/appearance preferences. Shape only.
+```
+expected gain on the real axis ≈ capture × sd_within(axis)     [both measured]
+```
 
-## 6. Where this could still be wrong
+Run that for `L_OH` and `L_Th` using Step 1's numbers. If the predicted gain is
+smaller than the judge's own measurement noise, **the honest answer is still no**
+— even with a passing positive control. Write the number down before you look at
+it.
 
-Stated up front, since the retired project's failure was an unexamined premise:
+**No-go** if `capture ≈ 0`. That means ~80 pairs is far below what this model
+needs, and the extrapolation to a rentable dataset (10³–10⁴ pairs, hundreds of
+GPU-hours) is a guess rather than an inference. Don't buy a guess.
 
-**The core assumption is that printability preferences are learnable from ~10³
-pairs by a LoRA on one stage of a 4B-parameter pipeline.** Nothing here
-establishes that. Diffusion-DPO used two orders of magnitude more data for a
-much broader target. Gate 4 is the first place this assumption gets tested, and
-it is placed before any large compute commitment for that reason.
+## 6. Cost, honestly
 
-The fallback if it fails is not "try harder": it is the direct differentiable
-physics loss from `printability_proxy.py`, which reaches r=0.760 against true
-physical printability and needs no preference data at all. `flow_dpo_theory.md`
-§2.2 already argues that three of the judge's four terms never needed preference
-machinery — only topology genuinely does. If DPO does not clear Gate 4, that
-argument wins by default and should be followed.
+Roughly **3–4 days wall-clock**, most of it overnight generation on this Mac.
+Step 1 is 4–6 hours and is the highest-information-per-hour measurement in the
+project — do it first even if you do nothing else.
+
+## 7. If it fails
+
+The fallback is not "try harder with more compute." It is the **direct
+differentiable physics loss** in `printability_proxy.py`, which reaches r=0.760
+against true physical printability, needs no preference data, no reference
+model, and no dataset generation at all. `flow_dpo_theory.md` §2.2 argues that
+three of the judge's four terms never needed preference machinery — only
+topology genuinely does. A failed PoC here is that argument winning, and it
+saves the rental.
