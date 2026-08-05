@@ -233,6 +233,10 @@ def main(argv=None) -> int:
     from .train_run import TrainRun
     run = TrainRun(f"dataset-{args.name}", args.runs_dir)
     run.write_meta({"kind": "dataset_build", "target": len(rows), "args": vars(args)})
+    # Heartbeat before the pipeline load, not after: the load takes ~92s, and
+    # without this the dashboard shows the run as dead for that whole window --
+    # which on a phone, mid-build, is indistinguishable from a crash.
+    run.status(step=len(done), total_steps=len(rows), state="loading pipeline")
 
     from . import pipeline as pipe_mod, vae_roundtrip
     print("loading pipeline ...", flush=True)
