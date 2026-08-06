@@ -252,6 +252,14 @@ def evaluate(model, pipeline, ds: SlatDataset, cfg: FlowDPOConfig, *,
             errors.append(f"{fid}: fidelity {type(e).__name__}: {e}")
 
         if sample_dir and i < n_render:
+            # Export the mesh, not only a picture of it. Rendering and
+            # discarding the geometry left a finished run with images and no
+            # models, recoverable only from whichever adapters survived
+            # pruning.
+            try:
+                tm.export(os.path.join(sample_dir, f"{fid}.glb"))
+            except Exception as e:
+                errors.append(f"{fid}: glb export {type(e).__name__}: {e}")
             try:
                 from . import render_mesh
                 # Fixed camera across every checkpoint. The dashboard shows the
