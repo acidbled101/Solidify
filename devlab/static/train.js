@@ -265,6 +265,7 @@ async function tick() {
     const now = Date.now();
     if (now - state.lastLog > CADENCE.log) { state.lastLog = now; refreshLog(); }
     if (now - state.lastGallery > CADENCE.gallery) { state.lastGallery = now; refreshGallery(); }
+    if (now - state.lastProg > CADENCE.prog) { state.lastProg = now; refreshProgression(); }
 
     $('alive').classList.remove('offline');
   } catch (e) {
@@ -620,6 +621,7 @@ async function boot() {
      h.lan_ip ? `lan        http://${h.lan_ip}:${location.port}` : ''].filter(Boolean).join('\n');
   state.dirty = true;
   await tick();
+  refreshProgression();
   state.timer = setInterval(tick, CADENCE.metrics);
   // Pick up newly created runs without paying for it on every metrics tick.
   setInterval(loadRuns, 30000);
