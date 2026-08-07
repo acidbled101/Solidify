@@ -66,8 +66,10 @@ def _truthy(v) -> bool:
 def select_clean_ids(
     limit: Optional[int] = None,
     min_faces: int = 200,
-    max_faces: int = 1_500_000,
+    max_faces: int = 400_000,
     exclude_noncommercial: bool = False,
+    per_thing_cap: int = 12,
+    dedup_geometry: bool = True,
     seed: int = 0,
 ) -> List[Dict]:
     """Return metadata rows for models passing every cleanliness filter.
@@ -106,10 +108,49 @@ def select_clean_ids(
             continue
         out.append({"file_id": fid, "license": lic, "thing_id": r.get("Thing ID"),
                     "num_faces": int(nf),
-                    "num_vertices": int(float(g.get("num_vertices") or 0))})
+                    "num_vertices": int(float(g.get("num_vertices") or 0)),
+                    "_area": round(float(g.get("total_area") or 0), 3),
+                    "_euler": int(float(g.get("euler_characteristic") or 0))})
 
     rng = np.random.default_rng(seed)
     rng.shuffle(out)
+
+    # --- curation beyond per-file cleanliness -------------------------------
+    # Thingi10K is organised as ~2,000 "things" split into ~10,000 files, and
+    # the split is wildly uneven: within the clean pool, 3,886 files come from
+    # just 1,003 things, and a single thing contributes 184 of them. Uncapped,
+    # that one thing would be 4.7% of the dataset and the model would spend a
+    # meaningful share of its updates on one designer's parts library.
+    #
+    # A "thing" is not always duplicates -- it is often a multi-part assembly,
+    # where the parts are genuinely different objects. So this caps rather than
+    # collapses, keeping several files per thing while preventing any one from
+    # dominating.
+    if dedup_geometry:
+        seen, deduped = set(), []
+        for r in out:
+            # Identical vertex count, face count, area and Euler characteristic
+            # is a near-certain duplicate; 118 such files exist in the pool.
+            key = (r["num_vertices"], r["num_faces"], r["_area"], r["_euler"])
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(r)
+        out = deduped
+
+    if per_thing_cap and per_thing_cap > 0:
+        counts: Dict[str, int] = {}
+        capped = []
+        for r in out:                      # already shuffled, so the kept
+            t = r.get("thing_id") or ""    # files per thing are a random subset
+            if counts.get(t, 0) >= per_thing_cap:
+                continue
+            counts[t] = counts.get(t, 0) + 1
+            capped.append(r)
+        out = capped
+
+    for r in out:
+        r.pop("_area", None); r.pop("_euler", None)
     return out[:limit] if limit else out
 
 
@@ -196,6 +237,10 @@ def main(argv=None) -> int:
     ap.add_argument("--device", default="mps")
     ap.add_argument("--model-id", default="microsoft/TRELLIS.2-4B")
     ap.add_argument("--exclude-noncommercial", action="store_true")
+    ap.add_argument("--per-thing-cap", type=int, default=12,
+                    help="max files from one Thingiverse thing (0 = uncapped)")
+    ap.add_argument("--no-dedup", dest="dedup_geometry", action="store_false")
+    ap.add_argument("--max-faces", type=int, default=400_000)
     ap.add_argument("--data-root", default=os.path.join(REPO, "data"))
     ap.add_argument("--runs-dir", default=os.path.join(REPO, "runs"))
     ap.add_argument("--dry-run", action="store_true", help="select and report, build nothing")
@@ -206,14 +251,20 @@ def main(argv=None) -> int:
         os.makedirs(os.path.join(out_dir, sub), exist_ok=True)
 
     print("selecting clean models ...", flush=True)
-    rows = select_clean_ids(limit=args.limit, exclude_noncommercial=args.exclude_noncommercial)
+    rows = select_clean_ids(limit=args.limit, exclude_noncommercial=args.exclude_noncommercial,
+                            per_thing_cap=args.per_thing_cap, dedup_geometry=args.dedup_geometry,
+                            max_faces=args.max_faces)
     print(f"selected {len(rows)} models", flush=True)
     if args.dry_run:
         import collections
         lic = collections.Counter(r["license"] for r in rows)
         for k, v in lic.most_common():
             print(f"  {k[:60]:<60} {v}")
-        print(f"  median faces: {int(np.median([r['num_faces'] for r in rows]))}")
+        import collections as _c
+        th = _c.Counter(r["thing_id"] for r in rows)
+        print(f"  median faces      : {int(np.median([r['num_faces'] for r in rows]))}")
+        print(f"  distinct things   : {len(th)}")
+        print(f"  max files / thing : {max(th.values())} ({100*max(th.values())/len(rows):.2f}% of set)")
         return 0
 
     # Resume: anything already recorded is skipped.
