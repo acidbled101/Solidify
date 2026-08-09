@@ -23,12 +23,26 @@ pre { font-family: Menlo, monospace; font-size: 8.5pt; background: #f6f6f6; padd
 <div class="sub">Branch <code>flow-dpo-training</code> &middot; 2026-07-31 to 2026-08-06 &middot; 17 commits &middot; Apple M4, 32&nbsp;GB unified memory</div>
 
 <h2>1. Executive summary</h2>
-<p>We retired the inference-time DPO steering approach, established that supervised fine-tuning is the
-better instrument for this problem, built the full data and training pipeline, and completed a
-1,170-step LoRA fine-tune of TRELLIS.2's shape-SLat flow model on 300 clean Thingi10K models.</p>
+<p>Work this period followed three stages: improving printability after generation, attempting to
+steer generation itself with DreamDPO concepts, and finally fine-tuning the SLat flow model directly.</p>
 
-<p><b>The fine-tune works on the axes it can reach.</b> Measured on exported meshes, held-out set,
-paired sampling noise:</p>
+<p><b>Post-processing was addressed first.</b> Many post-processing libraries and methods were tried to
+improve quality and printability, and different options were added to the pipeline. Of those,
+<b>manifold3d</b> proved the best for 3D printing, and it was added while keeping the original trimesh
+pipeline in place. Further research was done on the best way to decrease non-manifold edges of the
+models, and the TriFlow paper on generating artist-like 3D models was read as part of that.</p>
+
+<p><b>Integrating DreamDPO concepts was attempted and did not succeed.</b> The DreamDPO work for
+diffusion models was read, and rather than using a VLM, the preference discriminator was simulated as
+a score. That produced no gains: it always chose the reference path for the flow model. Combined with
+a lack of expertise in this area of the theory, the approach was set aside.</p>
+
+<p><b>Fine-tuning the SLat flow model with LoRA was chosen instead</b>, tried on a small sample of 300
+curated 3D models from Thingi10K. <b>Initial training showed gains, with significantly fewer
+non-manifold edges on the raw results and without loss in detail.</b> Collection of more latent data
+for training is continuing.</p>
+
+<p>Measured on exported meshes, held-out set, paired sampling noise:</p>
 
 <table>
 <tr><th>Model</th><th class="n">L_OH (overhang)</th><th class="n">L_Th (thin walls)</th><th class="n">L_Topo</th><th class="n">R_Detail</th></tr>
@@ -38,19 +52,25 @@ paired sampling noise:</p>
 <tr><td><b>step 1050</b></td><td class="n">0.2179 (&minus;5%)</td><td class="n good">0.0159 (&minus;86%)</td><td class="n good">0.0340 (&minus;82%)</td><td class="n">0.4358 (+1%)</td></tr>
 </table>
 
-<p>Step 1050 beats the base model on thin-wall penalty for <b>6 of 6</b> held-out objects. Image
-fidelity did <i>not</i> degrade (0.897 &rarr; 0.908&ndash;0.913), and surface detail slightly increased,
-so this is not printability bought by smoothing the model into generic blobs.</p>
+<p>Step 1050 beats the base model on thin-wall penalty for <b>6 of 6</b> held-out objects. A separate
+paired test over 10 objects and 3 sampling seeds found non-manifold edges reduced by 82% against the
+base model, winning on 10 of 10 objects. Detail was not lost: R_Detail rose slightly and image
+fidelity did not degrade (0.897 &rarr; 0.908&ndash;0.913).</p>
 
 <div class="box"><b>Three caveats stated up front.</b>
 (1) Overhang never moved on any checkpoint.
-(2) Watertightness is unchanged and cannot be changed by this training &mdash; it is a decoder property.
+(2) Watertightness is unchanged and cannot be changed by this training &mdash; it is a decoder property,
+which is why post-processing with manifold3d and trimesh remains part of the pipeline.
 (3) The run diverged at ~step 1100 due to a missing LR schedule; the last 70 steps are worthless and
 the final model is <i>not</i> the best model.</div>
 
 <h2>2. What was discovered</h2>
 
 <h3>2.1 The retired approach failed for a diagnosable reason</h3>
+<p>Rather than using a VLM, the preference discriminator was simulated as a score. It produced no
+gains, and always chose the reference path for the flow model. The measurements below say the same
+thing from the other side.</p>
+
 <p>Inference-time DPO steering produced a gradient contribution of <b>&minus;0.0027 &plusmn; 0.0078</b> over
 17 scored forks &mdash; indistinguishable from zero. Root cause: the only differentiable scalar available
 (<code>slat_detail_proxy</code>) agreed with the judge's within-fork argmax <b>5.9%</b> of the time against
@@ -100,6 +120,19 @@ bit-identical, so any movement is attributable to the model.</p>
 </table>
 <p class="small">The single highest-leverage change all week was replacing <code>except Exception: continue</code>
 with recorded, printed failures. It converted two blind retries into one-step diagnoses.</p>
+
+<h3>2.7 Post-processing was addressed before generation was</h3>
+<p>Many post-processing libraries and methods were tried to improve quality and printability, with
+different options added to the pipeline. <b>manifold3d</b> was found to be the best for 3D printing and
+was added, with the original trimesh pipeline kept alongside it. Separate research was done on the
+best way to decrease non-manifold edges, and the TriFlow paper on generating artist-like 3D models
+was read.</p>
+
+<p>This matters for reading the rest of this report: the fine-tuning results quoted here are on
+<b>raw</b> decoder output, with no post-processing applied. The reduction in non-manifold edges is
+therefore a gain made <i>before</i> manifold3d or trimesh repair runs, not instead of them. Both remain
+in the pipeline, and the round-trip result in &sect;2.3 is why &mdash; watertightness is a decoder property
+that fine-tuning cannot reach.</p>
 
 <h2>3. What was built</h2>
 <table>
