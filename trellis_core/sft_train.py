@@ -47,6 +47,7 @@ import json
 import math
 import os
 import random
+import statistics
 import sys
 import time
 from typing import Dict, List, Optional
@@ -99,6 +100,61 @@ def split_dataset(root: str, holdout: int, seed: int = 0):
 # ---------------------------------------------------------------------------
 # Loss
 # ---------------------------------------------------------------------------
+
+
+def flow_matching_loss_batch(model, samples, cfg: FlowDPOConfig, p_uncond: float = 0.0):
+    """One forward/backward over a MINI-BATCH of sparse latents.
+
+    SparseTensor already carries a batch index in coords[:, 0], so several
+    objects can share one forward instead of being run one at a time and
+    summed by gradient accumulation. That is the difference between N forward
+    passes and one, and on MPS the per-launch overhead is a real share of a
+    small model's step time.
+
+    Objects have wildly different token counts (726 at p10, 4729 at p90), so
+    batches are formed by a TOKEN budget rather than a fixed count -- a fixed
+    count would either overflow memory on a batch of large meshes or waste it
+    on a batch of small ones.
+
+    The loss is the mean of per-object means, not the mean over all tokens.
+    Token-mean would weight a 5000-token object seven times as heavily as a
+    700-token one purely for being bigger.
+    """
+    from trellis2.modules import sparse as sp
+
+    device = samples[0][1].device
+    B = len(samples)
+    t = sample_timesteps(B, cfg, device=device)
+
+    feats_all, coords_all, tgt_all, idx_all, conds = [], [], [], [], []
+    for b, (coords, feats, cond) in enumerate(samples):
+        eps = torch.randn(feats.shape, device=device, dtype=feats.dtype)
+        tb = t[b]
+        feats_all.append(noise_latent(feats, eps, tb, cfg.sigma_min))
+        tgt_all.append(velocity_target(feats, eps, cfg.sigma_min))
+        c = coords.clone()
+        c[:, 0] = b                      # batch index for this object
+        coords_all.append(c)
+        idx_all.append(torch.full((coords.shape[0],), b, dtype=torch.long, device=device))
+        # conditioning dropout is per-object, as in the official CFG trainer
+        conds.append(torch.zeros_like(cond) if (p_uncond > 0 and random.random() < p_uncond) else cond)
+
+    x_t = torch.cat(feats_all, 0)
+    v_tgt = torch.cat(tgt_all, 0)
+    coords_cat = torch.cat(coords_all, 0)
+    sample_index = torch.cat(idx_all, 0)
+    cond_cat = torch.cat(conds, 0)
+
+    st = sp.SparseTensor(feats=x_t.float(), coords=coords_cat)
+    pred = model(st, (1000.0 * t).to(torch.float32), cond_cat)
+    v_pred = pred.feats if hasattr(pred, "feats") else pred
+
+    se = (v_pred.float() - v_tgt.float()).pow(2).mean(dim=1)     # per token
+    per_obj = torch.zeros(B, device=device, dtype=se.dtype).index_add(0, sample_index, se)
+    counts = torch.zeros(B, device=device, dtype=se.dtype).index_add(
+        0, sample_index, torch.ones_like(se))
+    loss = (per_obj / counts.clamp_min(1)).mean()
+    return loss, [float(x) for x in t]
 
 
 def flow_matching_loss(model, coords, feats, cond, cfg: FlowDPOConfig,
@@ -160,6 +216,7 @@ def evaluate(model, pipeline, ds: SlatDataset, cfg: FlowDPOConfig, *,
     out: Dict[str, List[float]] = {k: [] for k in
                                    ("heldout_loss", "L_OH", "L_Th", "L_Topo", "R_Detail", "S")}
     watertight, dispersion_feats, errors, sims = [], [], [], []
+    nonmanifold, openrate, components = [], [], []
     sampler = pipeline.shape_slat_sampler
     norm = pipeline.shape_slat_normalization
     mean = torch.as_tensor(norm["mean"], device=device)
@@ -221,6 +278,14 @@ def evaluate(model, pipeline, ds: SlatDataset, cfg: FlowDPOConfig, *,
 
         rng = np.random.default_rng(7)   # fixed: eval-to-eval comparability
         s, _ = geometric_judge.score_mesh_detailed(tm, judge_weights, rng=rng)
+        # Topology on the FULL mesh. The judge decimates before scoring and
+        # that decimation is itself a large source of non-manifold edges
+        # (measured ~50x inflation), so L_Topo cannot be used to rank models.
+        from .topology_test import mesh_topology
+        topo = mesh_topology(tm)
+        nonmanifold.append(topo["nonmanifold_rate"])
+        openrate.append(topo["open_rate"])
+        components.append(topo["components"])
         out["L_OH"].append(s.overhang_penalty)
         out["L_Th"].append(s.thickness_penalty)
         out["L_Topo"].append(s.topology_penalty)
@@ -274,6 +339,9 @@ def evaluate(model, pipeline, ds: SlatDataset, cfg: FlowDPOConfig, *,
     res = {k: (float(np.mean(v)) if v else None) for k, v in out.items()}
     res["watertight_rate"] = float(np.mean(watertight)) if watertight else None
     res["image_similarity"] = float(np.mean(sims)) if sims else None
+    res["nonmanifold_rate"] = float(np.mean(nonmanifold)) if nonmanifold else None
+    res["open_rate"] = float(np.mean(openrate)) if openrate else None
+    res["components"] = float(np.mean(components)) if components else None
     res["n_eval"] = len(watertight)
     if errors:
         res["errors"] = errors[:6]
@@ -324,6 +392,18 @@ def main(argv=None) -> int:
                     action="store_false",
                     help="disable activation checkpointing (will swap-thrash on 32GB)")
     ap.add_argument("--empty-cache-every", type=int, default=5)
+    ap.add_argument("--warmup", type=int, default=200, help="linear warmup steps")
+    ap.add_argument("--lr-min-ratio", type=float, default=0.02,
+                    help="cosine floor as a fraction of peak lr")
+    ap.add_argument("--token-budget", type=int, default=9000,
+                    help="mini-batch is filled until total tokens exceed this")
+    ap.add_argument("--max-batch", type=int, default=6)
+    ap.add_argument("--grad-spike", type=float, default=5.0,
+                    help="skip a batch whose grad norm exceeds this x running median")
+    ap.add_argument("--keep-best", type=int, default=5,
+                    help="how many best checkpoints to retain")
+    ap.add_argument("--rank-metric", default="nonmanifold_rate",
+                    help="eval key used to rank checkpoints (lower is better)")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--smoke", type=int, default=0, help="run N steps and exit (no eval)")
     args = ap.parse_args(argv)
@@ -374,6 +454,22 @@ def main(argv=None) -> int:
                         t_sampling="uniform", t_max=1.0)
     judge_weights = geometric_judge.JudgeWeights()
 
+    def lr_at(step):
+        """Linear warmup then cosine decay to `lr_min_ratio` of peak.
+
+        The previous run used a constant 1e-4 for 8.7 epochs and destroyed
+        itself at ~step 1100 with the gradient norm going from 0.05 to 332.
+        Decay is the standard guard against that, and warmup keeps the first
+        updates small while AdamW's moment estimates are still cold.
+        """
+        base = control.lr or args.lr
+        if step <= args.warmup:
+            return base * step / max(args.warmup, 1)
+        p = (step - args.warmup) / max(total_steps - args.warmup, 1)
+        p = min(max(p, 0.0), 1.0)
+        return base * (args.lr_min_ratio +
+                       (1 - args.lr_min_ratio) * 0.5 * (1 + math.cos(math.pi * p)))
+
     start_step = 0
     ckpt = run.latest_checkpoint()
     if ckpt:
@@ -389,6 +485,8 @@ def main(argv=None) -> int:
     rng.shuffle(order)
     cursor = 0
     ema_loss = None
+    gn_hist, n_spikes = [], 0
+    ckpt_scores = {}   # step -> rank metric, drives best-N retention
     t_start = time.time()
     skipped = 0
     samples_seen = start_step * args.accum
@@ -425,35 +523,59 @@ def main(argv=None) -> int:
 
         t_step = time.time()
         opt.zero_grad(set_to_none=True)
-        acc_loss = 0.0
         bin_losses = {}
         step_tokens = 0
-        # Gradient checkpointing is NOT optional here. A backward through this
-        # model retains ~38GB of activations (measured in dpo_branch, see
-        # checkpointed_blocks' docstring) against 32GB of physical memory, so
-        # without it the step does not OOM -- it silently falls into swap. The
-        # first run of this trainer took 464s for one step with the process in
-        # uninterruptible IO wait, RSS collapsed from 14.7GB to 117MB, and
-        # 24.4GB of a 25.6GB swap file in use. It was thrashing, not computing.
-        with checkpointed_blocks(model, args.grad_checkpointing):
-          for _ in range(args.accum):
-              if cursor >= len(order):
-                  rng.shuffle(order); cursor = 0
-              fid = train_ds.ids[order[cursor]]; cursor += 1
-              coords, feats, cond = train_ds.load(fid, args.device)
-              if coords.shape[0] > args.max_tokens:
-                  skipped += 1
-                  continue
-              loss, t_val = flow_matching_loss(model, coords, feats, cond, cfg,
-                                               p_uncond=args.p_uncond)
-              bin_losses.setdefault(min(9, int(t_val * 10)), []).append(float(loss))
-              step_tokens += int(coords.shape[0])
-              (loss / args.accum).backward()
-              acc_loss += float(loss) / args.accum
-              del coords, feats, cond, loss
 
-        gn = torch.nn.utils.clip_grad_norm_(params, 1.0)
-        opt.step()
+        # ---- assemble one mini-batch under a token budget --------------
+        batch = []
+        while len(batch) < args.max_batch:
+            if cursor >= len(order):
+                rng.shuffle(order); cursor = 0
+            fid = train_ds.ids[order[cursor]]; cursor += 1
+            coords, feats, cond = train_ds.load(fid, args.device)
+            n = coords.shape[0]
+            if n > args.max_tokens:
+                skipped += 1
+                del coords, feats, cond
+                continue
+            if batch and step_tokens + n > args.token_budget:
+                cursor -= 1                      # put it back for the next step
+                del coords, feats, cond
+                break
+            batch.append((coords, feats, cond))
+            step_tokens += n
+
+        lr_now = lr_at(step)
+        for g in opt.param_groups:
+            g["lr"] = lr_now
+
+        with checkpointed_blocks(model, args.grad_checkpointing):
+            loss, t_vals = flow_matching_loss_batch(model, batch, cfg,
+                                                    p_uncond=args.p_uncond)
+            loss.backward()
+        acc_loss = float(loss.detach())
+        for tv in t_vals:
+            bin_losses.setdefault(min(9, int(tv * 10)), []).append(acc_loss)
+        for c, f, cd in batch:
+            del c, f, cd
+        del batch, loss
+
+        gn = float(torch.nn.utils.clip_grad_norm_(params, 1.0))
+        # Drop, do not merely clip, a batch whose gradient is a wild outlier.
+        # Clipping bounds one update but cannot stop AdamW's moments filling
+        # with garbage across a sustained blow-up, which is how the previous
+        # run destroyed itself. The median is over recent healthy steps, so
+        # the threshold adapts as training settles.
+        gn_hist.append(gn)
+        if len(gn_hist) > 100:
+            gn_hist.pop(0)
+        med = statistics.median(gn_hist) if len(gn_hist) >= 20 else None
+        spiked = med is not None and gn > args.grad_spike * max(med, 1e-8)
+        if spiked:
+            n_spikes += 1
+            opt.zero_grad(set_to_none=True)
+        else:
+            opt.step()
 
         # MPS holds freed blocks in a cache rather than returning them, and
         # latent sizes here vary 136..11685 tokens, so the cache grows to the
@@ -472,7 +594,8 @@ def main(argv=None) -> int:
 
         if step % max(1, control.log_every or 1) == 0:
             run.log("train", step, loss=acc_loss, loss_ema=ema_loss,
-                    lr=opt.param_groups[0]["lr"], grad_norm=float(gn),
+                    lr=lr_now, grad_norm=gn, spiked=int(spiked), n_spikes=n_spikes,
+                    batch=len(t_vals),
                     step_s=dt, mem_gb=mem, mem_peak_gb=peak, skipped=skipped,
                     epoch=epoch, samples_seen=samples_seen, tokens=step_tokens,
                     **{f"t_bin_{k}": float(np.mean(v)) for k, v in bin_losses.items()})
@@ -496,6 +619,8 @@ def main(argv=None) -> int:
                            n_render=args.eval_render)
             model.train()
             run.log("eval", step, **res)
+            if res.get(args.rank_metric) is not None:
+                ckpt_scores[step] = float(res[args.rank_metric])
             print(f"[eval @ {step}] " + "  ".join(
                 f"{k}={v:.4f}" for k, v in res.items() if isinstance(v, float)), flush=True)
 
@@ -505,7 +630,9 @@ def main(argv=None) -> int:
             torch.save({"lora": lora_mod.lora_state_dict(model),
                         "optimizer": opt.state_dict(), "step": step}, os.path.join(d, "adapter.pt"))
             run.mark_checkpoint_done(d)
-            run.prune_checkpoints(keep=3)
+            kept = run.prune_best_checkpoints(ckpt_scores, keep=args.keep_best)
+            run.log("event", step, kept_checkpoints=kept,
+                    rank_metric=args.rank_metric)
 
         if step % 10 == 0 or args.smoke:
             print(f"step {step}/{total_steps}  loss {acc_loss:.4f}  ema {ema_loss:.4f}  "

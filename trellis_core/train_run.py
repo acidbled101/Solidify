@@ -220,6 +220,42 @@ class TrainRun:
         with open(os.path.join(ckpt_dir, "DONE"), "w") as f:
             f.write(str(time.time()))
 
+    def prune_best_checkpoints(self, scores: Dict[int, float], keep: int = 5,
+                               always_keep_latest: bool = True) -> List[int]:
+        """Retain the `keep` best-scoring checkpoints (lower score = better).
+
+        Retaining the most RECENT n is the wrong policy for this project: the
+        previous run's best model was step 1050 while the run continued to
+        1170 and diverged, so a recency policy would have kept three ruined
+        checkpoints and deleted the good one. Ranking by an eval metric keeps
+        what is actually worth keeping.
+
+        The latest complete checkpoint is retained regardless of score, since
+        it is the only one a resume can continue from.
+        """
+        root = os.path.join(self.dir, "ckpt")
+        if not os.path.isdir(root):
+            return []
+        done = sorted(
+            int(d.replace("step_", ""))
+            for d in os.listdir(root)
+            if d.startswith("step_") and os.path.exists(os.path.join(root, d, "DONE"))
+        )
+        if not done:
+            return []
+        ranked = sorted((st for st in done if st in scores), key=lambda st: scores[st])
+        protect = set(ranked[:keep])
+        # Unscored checkpoints are newer than the last eval, not bad -- keep
+        # them rather than deleting work that has not been judged yet.
+        protect |= {st for st in done if st not in scores}
+        if always_keep_latest:
+            protect.add(done[-1])
+        import shutil
+        for st in done:
+            if st not in protect:
+                shutil.rmtree(os.path.join(root, f"step_{st:08d}"), ignore_errors=True)
+        return sorted(protect)
+
     def prune_checkpoints(self, keep: int = 3) -> None:
         """Keep the newest `keep` complete checkpoints. LoRA adapters are small,
         but eval samples and optimizer state are not, and a weekend run at one

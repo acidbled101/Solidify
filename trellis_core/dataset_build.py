@@ -91,13 +91,25 @@ def select_clean_ids(
         g = geometry.get(fid)
         if not g:
             continue
+        # Keep only the checks that affect whether a mesh ENCODES correctly.
+        # Closed + PWN give a well-defined inside/outside, which the dual-grid
+        # voxelizer needs; manifold and no-degenerate keep the triangles sane.
+        #
+        # Deliberately NOT required, having been required earlier and then
+        # reconsidered:
+        #   Single Component -- discards legitimate multi-part printable models
+        #     (a box and its lid shipped in one file), 1,243 files.
+        #   zero self-intersections -- 45% of Thingi10K self-intersects and
+        #     slicers handle it routinely; our voxelizer resamples the surface
+        #     via QEF rather than trusting the input triangles, so it tolerates
+        #     it too. 969 files.
+        # Every model here is a real printable object; these two filters were
+        # measuring mesh hygiene the encoder does not actually depend on.
         if not all(_truthy(r[k]) for k in
                    ("Closed", "Edge manifold", "Vertex manifold",
-                    "Single Component", "PWN", "No degenerate faces")):
+                    "PWN", "No degenerate faces")):
             continue
         try:
-            if float(g["num_self_intersections"]) != 0:
-                continue
             nf = float(g["num_faces"])
         except (TypeError, ValueError):
             continue
@@ -289,6 +301,7 @@ def main(argv=None) -> int:
     # which on a phone, mid-build, is indistinguishable from a crash.
     run.status(step=len(done), total_steps=len(rows), state="loading pipeline")
 
+    import torch
     from . import pipeline as pipe_mod, vae_roundtrip
     print("loading pipeline ...", flush=True)
     t0 = time.time()
@@ -321,6 +334,16 @@ def main(argv=None) -> int:
                     coverage=info["coverage"])
             run.status(step=n_ok, total_steps=len(rows), state="building",
                        eta_s=(len(todo) - i) * per, failures=n_fail)
+            # MPS keeps freed blocks in a cache rather than returning them, so
+            # the cache grows to the high-water mark of the largest mesh seen
+            # and stays there. Over thousands of models on a 32GB machine that
+            # is what tips the build into swap: measured at model ~2000, swap
+            # hit 60.0GB of 60.4GB and per-model time went from 24s to 840s,
+            # with the time no longer correlating with mesh size at all --
+            # the signature of thrashing rather than compute. The trainer
+            # already does this every 5 steps; the builder did not.
+            if args.device == "mps" and i % 10 == 0:
+                torch.mps.empty_cache()
             print(f"[{i}/{len(todo)}] {fid}  tokens {info['n_tokens']:>5}  "
                   f"{sum(info['seconds'].values()):.1f}s  eta {(len(todo)-i)*per/3600:.1f}h", flush=True)
         except Exception as e:
