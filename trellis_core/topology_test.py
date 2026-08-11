@@ -46,18 +46,40 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 def mesh_topology(tm) -> Dict:
     """Edge-level topology of the FULL mesh. No decimation, no repair."""
     edges = tm.edges_sorted
-    _uniq, counts = np.unique(edges, axis=0, return_counts=True)
-    n_edges = len(counts)
-    comps = tm.split(only_watertight=False) if len(tm.faces) < 1_200_000 else []
-    big = max((len(c.faces) for c in comps), default=len(tm.faces))
+    _uniq, edge_counts = np.unique(edges, axis=0, return_counts=True)
+    n_edges = len(edge_counts)
+    # Component counting was capped at 1.2M faces for speed, but every mesh
+    # from the real inference path exceeds that, so the metric silently
+    # reported -1 for the entire comparison. Counting via the face-adjacency
+    # graph instead of trimesh.split avoids building N submeshes, which is
+    # what was actually slow -- we only need the count and the largest share.
+    comps = None
+    try:
+        import scipy.sparse as _sp
+        from scipy.sparse.csgraph import connected_components as _cc
+        f = len(tm.faces)
+        adj = tm.face_adjacency
+        if f:
+            g = _sp.coo_matrix(
+                (np.ones(len(adj)), (adj[:, 0], adj[:, 1])), shape=(f, f))
+            n_comp, labels = _cc(g, directed=False)
+            comp_sizes = np.bincount(labels)
+            comps, big = int(n_comp), int(comp_sizes.max())
+    except Exception:
+        comps = None
+    if comps is None:                       # fall back to the old path
+        _c = tm.split(only_watertight=False) if len(tm.faces) < 1_200_000 else []
+        comps = len(_c) if _c else -1
+        big = max((len(c.faces) for c in _c), default=len(tm.faces))
+
     return {
         "faces": int(len(tm.faces)),
         "edges": int(n_edges),
-        "n_open": int((counts == 1).sum()),
-        "n_nonmanifold": int((counts > 2).sum()),
-        "open_rate": float((counts == 1).mean()),
-        "nonmanifold_rate": float((counts > 2).mean()),
-        "components": int(len(comps)) if comps else -1,
+        "n_open": int((edge_counts == 1).sum()),
+        "n_nonmanifold": int((edge_counts > 2).sum()),
+        "open_rate": float((edge_counts == 1).mean()),
+        "nonmanifold_rate": float((edge_counts > 2).mean()),
+        "components": int(comps),
         "largest_frac": float(big / max(len(tm.faces), 1)),
         "watertight": bool(tm.is_watertight),
         "euler": int(tm.euler_number),
