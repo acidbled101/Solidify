@@ -66,6 +66,7 @@ def instrumented(
     *,
     on_step: Optional[Callable[[str, int, int, float], None]] = None,
     on_preview: Optional[Callable[[str, int], None]] = None,
+    on_structure: Optional[Callable] = None,
     expected_bars: int = 3,
     preview_at: Sequence[float] = (),
     preview_resolution: int = 128,
@@ -142,6 +143,23 @@ def instrumented(
 
         return gen()
 
+    # The structure preview is hooked HERE, on the pipeline method, rather than
+    # via a callback threaded through our own _run_geometry_only. That callback
+    # only fired on the skip_texture branch; whenever a job ran with texture
+    # inference on, the pipeline's own run() was used and no preview ever
+    # appeared -- with two layers of `except: pass` hiding it. Wrapping the
+    # method covers every path into the structure stage by construction.
+    real_sample_structure = pipeline.sample_sparse_structure
+
+    def sample_structure_hook(cond, resolution, num_samples=1, sampler_params={}, *a, **kw):
+        coords = real_sample_structure(cond, resolution, num_samples, sampler_params, *a, **kw)
+        if on_structure is not None:
+            try:
+                on_structure(coords, resolution)
+            except Exception:
+                log.warning("structure preview failed", exc_info=True)
+        return coords
+
     sampler = pipeline.shape_slat_sampler
     real_sample_once = sampler.sample_once
     want_previews = bool(preview_at) and preview_dir is not None
@@ -158,12 +176,14 @@ def instrumented(
         return out
 
     flow_euler.tqdm = tqdm_hook
+    pipeline.sample_sparse_structure = sample_structure_hook
     if want_previews:
         sampler.sample_once = sample_once_hook
     try:
         yield cur
     finally:
         flow_euler.tqdm = real_tqdm
+        pipeline.sample_sparse_structure = real_sample_structure
         if want_previews:
             sampler.sample_once = real_sample_once
 
@@ -217,7 +237,7 @@ def write_voxel_preview(coords, out_path: str, grid: int = 32) -> bool:
         log.info("voxel preview: %d voxels -> %s", n, os.path.basename(out_path))
         return True
     except Exception:
-        log.debug("voxel preview failed", exc_info=True)
+        log.warning("voxel preview failed", exc_info=True)
         return False
 
 

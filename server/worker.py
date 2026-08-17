@@ -17,6 +17,11 @@ model-load cost is paid at most once for the whole server lifetime.
 import trellis_core  # noqa: F401,E402  (must be first trellis-related import)
 
 import logging
+# Module level, deliberately. This used to be imported inside _run_job, which
+# made `os` a LOCAL of that function -- so the preview callbacks defined above
+# it closed over an unbound name and raised NameError the moment they ran,
+# silently, because the callers swallowed exceptions. Previews never appeared.
+import os
 import queue
 import threading
 import time
@@ -267,6 +272,7 @@ def _run_job(store: JobStore, job_id: str) -> None:
             pipeline,
             on_step=on_step,
             on_preview=on_preview,
+            on_structure=on_structure,
             expected_bars=expected_bars,
             preview_at=config.PREVIEW_AT,
             preview_resolution=config.PREVIEW_RESOLUTION,
@@ -275,7 +281,6 @@ def _run_job(store: JobStore, job_id: str) -> None:
             gen = run_generation(
                 pipeline,
                 img,
-                on_structure=on_structure,
                 seed=int(params.get("seed", config.DEFAULT_SEED)),
                 pipeline_type=params.get("pipeline_type", config.DEFAULT_PIPELINE_TYPE),
                 target_faces=int(params.get("target_faces", config.DEFAULT_TARGET_FACES)),
@@ -327,8 +332,6 @@ def _run_job(store: JobStore, job_id: str) -> None:
         file_specs.append(("printable_stl", "Print-ready (STL)", "model_printable.stl"))
 
     # --- Assemble result (only files that were actually written) -----------
-    import os
-
     files = [
         {"kind": kind, "label": label, "filename": name}
         for kind, label, name in file_specs
