@@ -40,10 +40,15 @@ def parse_model(spec: str, runs_dir: str) -> Tuple[str, Optional[str]]:
         return "base", None
     run_id, _, step = spec.partition(":")
     step = int(step)
+    # Two naming schemes, because two trainers wrote these: sft_train.py used
+    # ckpt/step_00005000/, the portable a100/sft_cuda.py uses ckpt/best_step5000/
+    # (and 'final'/'last'). Both produce byte-identical adapter payloads, so the
+    # only thing that differs is where to look.
     for sub in ("ckpt_keep", "ckpt"):
-        p = os.path.join(runs_dir, run_id, sub, f"step_{step:08d}", "adapter.pt")
-        if os.path.exists(p):
-            return f"{run_id}@{step}", p
+        for name in (f"step_{step:08d}", f"best_step{step}"):
+            p = os.path.join(runs_dir, run_id, sub, name, "adapter.pt")
+            if os.path.exists(p):
+                return f"{run_id}@{step}", p
     raise FileNotFoundError(f"no adapter for {spec}")
 
 

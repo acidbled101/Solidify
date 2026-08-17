@@ -1,0 +1,30 @@
+# Dependencies for training the shape-SLat flow model on CUDA.
+#
+# This is deliberately short. The flow model contains no SparseConv3d and no
+# rasteriser -- only SparseLinear and attention -- so none of TRELLIS.2's heavy
+# native extensions are needed to TRAIN it: no spconv, no o_voxel, no
+# nvdiffrast, no diso, no utils3d, no rembg, no DINOv3. Those belong to the
+# decode/eval path, which runs on the Mac instead.
+#
+# torch is intentionally NOT pinned here: install the build that matches the
+# host's CUDA driver first (most A100 images ship with one already), then
+# `pip install -r requirements-cuda.txt`.
+
+safetensors>=0.4.0
+huggingface_hub>=0.23.0
+einops>=0.7.0
+numpy>=1.24
+tqdm
+
+# flash-attn is REQUIRED for --max-batch > 1. Without it trellis2 falls back to
+# an sdpa path that pads mixed-length objects with zeros and attends over the
+# padding, which corrupts the loss by several percent (measured: 6.5% on a
+# batch of 3). Training still runs correctly at --max-batch 1 without it, just
+# ~5x slower per epoch.
+#
+# Install it separately, AFTER torch, and give it time -- it compiles:
+#   pip install flash-attn --no-build-isolation
+#
+# Prebuilt wheels for common torch/CUDA/python combinations are at
+#   https://github.com/Dao-AILab/flash-attention/releases
+# and are worth using: the source build takes 20-40 minutes on a typical box.

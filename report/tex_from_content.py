@@ -63,40 +63,45 @@ PRE = r"""\documentclass[11pt,a4paper]{article}
 
 FIGW = {1:'\\linewidth', 2:'0.85\\linewidth', 3:'0.23\\linewidth', 4:'\\linewidth'}
 
-out = [PRE.replace('%%ABSTRACT%%', esc(ABSTRACT.strip()))]
-for it in CONTENT:
-    k = it[0]
-    if k == 'h1':
-        out.append('' if it[1] else r'\section*{%s}\addcontentsline{toc}{section}{%s}' % (it[2], it[2]))
-        if it[1]: out.append(r'\section{%s}' % esc(it[2]))
-    elif k == 'h2':
-        out.append(r'\subsection{%s}' % esc(it[2]))
-    elif k == 'p':
-        out.append(esc(it[1].strip()) + '\n')
-    elif k == 'eq':
-        out.append(r'\[ \text{%s} \]' % esc(it[1]))
-    elif k == 'fig':
-        files, _w, n, cap = it[1], it[2], it[3], it[4]
-        imgs = '\\hfill\n  '.join(r'\includegraphics[width=%s]{weekly_figs/%s}' % (FIGW[n], f) for f in files)
-        out.append('\\begin{figure}[htbp]\n  \\centering\n  %s\n  \\caption{%s}\n\\end{figure}' % (imgs, esc(cap)))
-    elif k == 'table':
-        hdr, rows = it[1], it[2]
-        out.append(r'\begin{table}[htbp]\centering\small')
-        out.append(r'\begin{tabular}{@{}lrr@{}}\toprule')
-        out.append(' & '.join(r'\textbf{%s}' % esc(c) for c in hdr) + r' \\ \midrule')
-        for r in rows:
-            cells = [(r'\textcolor{good}{\textbf{%s}}' % esc(c[1:])) if c.startswith('*') else esc(c) for c in r]
-            out.append(' & '.join(cells) + r' \\')
-        out.append(r'\bottomrule\end{tabular}\end{table}')
-    elif k == 'refs':
-        out.append(r'\begin{enumerate}[leftmargin=*,itemsep=3pt]')
-        for t in it[1]:
-            t = esc(t)
-            t = re.sub(r'(https?://\S+)', r'\\url{\1}', t)
-            out.append(r'  \item ' + t)
-        out.append(r'\end{enumerate}')
-out.append(r'\end{document}')
+def emit(content, abstract, dest, figw=None):
+    FIGW = figw or globals()['FIGW']
+    out = [PRE.replace('%%ABSTRACT%%', esc(abstract.strip()))]
+    for it in content:
+        k = it[0]
+        if k == 'h1':
+            out.append('' if it[1] else r'\section*{%s}\addcontentsline{toc}{section}{%s}' % (it[2], it[2]))
+            if it[1]: out.append(r'\section{%s}' % esc(it[2]))
+        elif k == 'h2':
+            out.append(r'\subsection{%s}' % esc(it[2]))
+        elif k == 'p':
+            out.append(esc(it[1].strip()) + '\n')
+        elif k == 'eq':
+            out.append(r'\[ \text{%s} \]' % esc(it[1]))
+        elif k == 'fig':
+            files, _w, n, cap = it[1], it[2], it[3], it[4]
+            imgs = '\\hfill\n  '.join(r'\includegraphics[width=%s]{weekly_figs/%s}' % (FIGW[n], f) for f in files)
+            out.append('\\begin{figure}[htbp]\n  \\centering\n  %s\n  \\caption{%s}\n\\end{figure}' % (imgs, esc(cap)))
+        elif k == 'table':
+            hdr, rows = it[1], it[2]
+            out.append(r'\begin{table}[htbp]\centering\small')
+            out.append(r'\begin{tabular}{@{}lrr@{}}\toprule')
+            out.append(' & '.join(r'\textbf{%s}' % esc(c) for c in hdr) + r' \\ \midrule')
+            for r in rows:
+                cells = [(r'\textcolor{good}{\textbf{%s}}' % esc(c[1:])) if c.startswith('*') else esc(c) for c in r]
+                out.append(' & '.join(cells) + r' \\')
+            out.append(r'\bottomrule\end{tabular}\end{table}')
+        elif k == 'refs':
+            out.append(r'\begin{enumerate}[leftmargin=*,itemsep=3pt]')
+            for t in it[1]:
+                t = esc(t)
+                t = re.sub(r'(https?://\S+)', r'\\url{\1}', t)
+                out.append(r'  \item ' + t)
+            out.append(r'\end{enumerate}')
+    out.append(r'\end{document}')
+    open(dest, 'w').write('\n'.join(x for x in out if x is not None) + '\n')
+    return dest
 
-dest = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'weekly_report_ali.tex')
-open(dest, 'w').write('\n'.join(x for x in out if x is not None) + '\n')
-print('wrote', dest)
+
+if __name__ == '__main__':
+    dest = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'weekly_report_ali.tex')
+    print('wrote', emit(CONTENT, ABSTRACT, dest))
