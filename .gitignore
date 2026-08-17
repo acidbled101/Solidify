@@ -28,3 +28,10 @@ trellis.db-shm
 *.db-wal
 *.db-shm
 server.log
+
+# LoRA adapter weights (75MB each). Rebuilt from a training run:
+#   torch.save({"lora": torch.load(<run>/ckpt/step_XXXXXXXX/adapter.pt)["lora"]}, ...)
+# Provenance for sft-1200-1050.pt: run sft-1200-20260806-0119, step 1050,
+# 300 curated Thingi10K objects, 8.7 epochs.
+adapters/
+watchdog.log

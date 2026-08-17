@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.trellis.webserver</string>
+
+    <!-- caffeinate -i -s keeps the Mac from idle/system sleeping for as long
+         as the server runs, so the LAN server stays reachable. It execs
+         run_server.sh, which in turn execs uvicorn (one process tree). -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/caffeinate</string>
+        <string>-i</string>
+        <string>-s</string>
+        <string>/bin/bash</string>
+        <string>/Users/scifablab/trellis-mac/trellis-mac/run_server.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/scifablab/trellis-mac/trellis-mac</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>TRELLIS_HOST</key>
+        <string>0.0.0.0</string>
+        <key>TRELLIS_PORT</key>
+        <string>8000</string>
+    </dict>
+
+    <!-- Start at login and restart automatically if the server ever exits. -->
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <!-- Wait at least 15s between restarts so a boot-time failure can't
+         busy-loop and hammer the GPU. -->
+    <key>ThrottleInterval</key>
+    <integer>15</integer>
+
+    <key>StandardOutPath</key>
+    <string>/Users/scifablab/trellis-mac/trellis-mac/server.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/scifablab/trellis-mac/trellis-mac/server.log</string>
+</dict>
+</plist>

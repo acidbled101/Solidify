@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.trellis.watchdog</string>
+
+    <!-- Polls /api/health and kickstarts com.trellis.webserver after three
+         consecutive failures. This covers the case launchd's KeepAlive cannot:
+         a server process that is alive but wedged with the GPU stuck, which
+         looks perfectly healthy to launchd while serving nothing. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/scifablab/trellis-mac/trellis-mac/watchdog.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/scifablab/trellis-mac/trellis-mac</string>
+
+    <!-- Every 60s. RunAtLoad is deliberately FALSE: at login the server is
+         still loading its ~90s pipeline, and a watchdog that starts counting
+         strikes immediately would fight the boot it is meant to protect. -->
+    <key>StartInterval</key>
+    <integer>60</integer>
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/scifablab/trellis-mac/trellis-mac/watchdog.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/scifablab/trellis-mac/trellis-mac/watchdog.log</string>
+</dict>
+</plist>

@@ -234,6 +234,7 @@ async def create_job(
     skip_printable: str = Form(None),
     skip_texture: str = Form(None),
     printable_pipeline: str = Form(None),
+    model_variant: str = Form(None),
 ):
     if worker.queue_depth() >= config.MAX_QUEUE_DEPTH:
         return _error(429, f"Queue is full ({config.MAX_QUEUE_DEPTH} jobs waiting). Try again shortly.")
@@ -274,6 +275,10 @@ async def create_job(
     if printable_pipeline_v not in config.ALLOWED_PRINTABLE_PIPELINES:
         return _error(400, f"printable_pipeline must be one of {config.ALLOWED_PRINTABLE_PIPELINES}.")
 
+    model_variant_v = model_variant or config.MODEL_VARIANT
+    if model_variant_v not in config.ALLOWED_MODEL_VARIANTS:
+        return _error(400, f"model_variant must be one of {config.ALLOWED_MODEL_VARIANTS}.")
+
     skip_printable_v = (
         _as_bool(skip_printable) if skip_printable is not None else config.SKIP_PRINTABLE_BY_DEFAULT
     )
@@ -289,6 +294,7 @@ async def create_job(
         "skip_printable": skip_printable_v,
         "skip_texture": skip_texture_v,
         "printable_pipeline": printable_pipeline_v,
+        "model_variant": model_variant_v,
     }
 
     operator = getattr(request.state, "user", "anonymous")
@@ -356,6 +362,11 @@ async def get_config():
         "skip_printable_by_default": config.SKIP_PRINTABLE_BY_DEFAULT,
         "printable_pipelines": list(config.ALLOWED_PRINTABLE_PIPELINES),
         "default_printable_pipeline": config.PRINTABLE_PIPELINE,
+        "model_variants": list(config.ALLOWED_MODEL_VARIANTS),
+        "default_model_variant": config.MODEL_VARIANT,
+        # False once the pipeline is warm and the adapter failed to load, which
+        # lets the UI stop offering a choice it cannot honour.
+        "adapter_available": worker.adapter_available(),
         "skip_texture_by_default": config.SKIP_TEXTURE_BY_DEFAULT,
         "no_texture": config.NO_TEXTURE,
         "max_upload_mb": config.MAX_UPLOAD_MB,

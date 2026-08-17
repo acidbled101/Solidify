@@ -38,6 +38,31 @@ NO_TEXTURE = _as_bool(os.environ.get("TRELLIS_NO_TEXTURE", "1"))
 # lowering peak memory. Set TRELLIS_SKIP_TEXTURE=0 to force the old full path.
 SKIP_TEXTURE_BY_DEFAULT = _as_bool(os.environ.get("TRELLIS_SKIP_TEXTURE", "1"))
 
+# --- Which shape-SLat weights generate ---------------------------------------
+# "tuned" runs the flow model with a LoRA adapter fine-tuned on 300 curated
+# Thingi10K meshes; "base" disables the adapter, which makes the model
+# bit-for-bit the stock TRELLIS.2 weights again -- the adapter is additive with
+# a zero-initialised B matrix, so switching it off is exact, not approximate.
+# Both variants share ONE loaded pipeline; there is no second copy of a 1.3B
+# model and switching costs nothing.
+#
+# Measured on raw output over a 5-image paired comparison (same seeds, same
+# sparse structure, no repair applied): non-manifold edges 0.923% -> 0.515%
+# (-44%), separate components 6301 -> 3800 (-40%), detail unchanged.
+#
+# CAVEAT: that comparison sampled the 512 flow model and decoded at 512. The
+# server's default pipeline_type is 1024_cascade, whose second stage
+# (shape_slat_flow_model_1024) is NOT adapted, so the measured gain may be
+# diluted under the cascade. Only the 512 model is wrapped -- the 1024
+# checkpoint has identical layer shapes and would accept these weights without
+# raising anything, which is exactly why it must not be given them.
+MODEL_VARIANT = os.environ.get("TRELLIS_MODEL_VARIANT", "tuned")
+ALLOWED_MODEL_VARIANTS = ("tuned", "base")
+ADAPTER_PATH = Path(os.environ.get(
+    "TRELLIS_ADAPTER_PATH", str(REPO_ROOT / "adapters" / "sft-1200-1050.pt")))
+ADAPTER_RANK = int(os.environ.get("TRELLIS_ADAPTER_RANK", "16"))
+ADAPTER_ALPHA = float(os.environ.get("TRELLIS_ADAPTER_ALPHA", "32"))
+
 # --- make_printable defaults -----------------------------------------------
 PRINTABLE_TARGET_FACES = int(os.environ.get("TRELLIS_PRINTABLE_TARGET_FACES", "1000000"))
 PRINTABLE_OVERHANG_ANGLE = float(os.environ.get("TRELLIS_OVERHANG_ANGLE", "45.0"))

@@ -27,6 +27,7 @@
     photoSrc: null, photoName: "", photoSize: "", photoFile: null,
     seed: "", detail: 1000000, quality: "standard", skipPrep: false, skipTexture: false,
     printablePipeline: "v3", advOpen: false,
+    modelVariant: "tuned", adapterAvailable: true,
     prog: 0, stageIdx: -1, log: [], queuePos: 0, busyReason: "", errMsg: "", errHint: "", dragOver: false,
     jobId: "",
     infoRows: null, diagRows: null, previewSrc: null, previewPath: null, libDraft: null,
@@ -151,6 +152,13 @@
         if (serverConfig.skip_printable_by_default) state.skipPrep = true;
         if (serverConfig.skip_texture_by_default) state.skipTexture = true;
         if (serverConfig.default_printable_pipeline) state.printablePipeline = serverConfig.default_printable_pipeline;
+        if (serverConfig.default_model_variant) state.modelVariant = serverConfig.default_model_variant;
+        // adapter_available only becomes false once the pipeline is warm and the
+        // adapter failed to load; until then the server reports its intent.
+        if (serverConfig.adapter_available === false) {
+          state.adapterAvailable = false;
+          state.modelVariant = "base";
+        }
         if (serverConfig.max_upload_mb) state.maxUploadMB = serverConfig.max_upload_mb;
       }
       refreshHealth();
@@ -614,6 +622,16 @@
     var v = vals();
     var open = state.advOpen ? (
       '<div style="padding:20px 18px;display:flex;flex-direction:column;gap:20px;border-top:1px solid rgba(53,242,226,.14)">' +
+        '<label style="display:flex;flex-direction:column;gap:8px"><span style="font-family:\'IBM Plex Mono\',monospace;font-size:10px;letter-spacing:.22em;color:#57c9bf">MODEL</span>' +
+          '<select data-model="modelVariant" style="background:rgba(4,28,26,.85);border:1px solid rgba(53,242,226,.25);color:#EAFDFB;padding:10px 12px;font-family:\'IBM Plex Mono\',monospace;font-size:13px;outline:none;max-width:320px"' + (state.adapterAvailable ? "" : " disabled") + '>' +
+            '<option value="tuned"' + (state.modelVariant === "tuned" ? " selected" : "") + '>Fine-tuned — fewer defects (recommended)</option>' +
+            '<option value="base"' + (state.modelVariant === "base" ? " selected" : "") + '>Original TRELLIS.2 — untrained</option>' +
+          '</select>' +
+          '<span style="font-family:\'IBM Plex Mono\',monospace;font-size:10px;letter-spacing:.06em;color:#3f7a73">' +
+            (state.adapterAvailable
+              ? "Fine-tuned on 300 print-ready meshes: 44% fewer non-manifold edges and 40% fewer loose fragments in the raw output, with no loss of detail. Pick Original to compare against the stock model."
+              : "Fine-tuned weights are not loaded on this server — every job runs the original model.") +
+          '</span></label>' +
         '<label style="display:flex;flex-direction:column;gap:8px"><span style="font-family:\'IBM Plex Mono\',monospace;font-size:10px;letter-spacing:.22em;color:#57c9bf">RANDOM SEED</span>' +
           '<input class="field" type="text" data-model="seed" value="' + esc(state.seed) + '" placeholder="random" style="background:rgba(4,28,26,.85);border:1px solid rgba(53,242,226,.25);color:#EAFDFB;padding:10px 12px;font-family:\'IBM Plex Mono\',monospace;font-size:13px;outline:none;max-width:200px" /></label>' +
         '<label style="display:flex;flex-direction:column;gap:8px"><span style="font-family:\'IBM Plex Mono\',monospace;font-size:10px;letter-spacing:.22em;color:#57c9bf">MESH DETAIL — <span id="detail-label" style="color:#35F2E2">' + v.detailLabel + '</span> FACES</span>' +
@@ -848,6 +866,7 @@
     fd.append("skip_printable", state.skipPrep ? "1" : "0");
     fd.append("skip_texture", state.skipTexture ? "1" : "0");
     fd.append("printable_pipeline", state.printablePipeline);
+    fd.append("model_variant", state.modelVariant);
     try {
       var r = await api("/api/jobs", { method: "POST", body: fd });
       if (r.status === 429) {

@@ -35,9 +35,18 @@ job_queue: "queue.Queue[str]" = queue.Queue()
 _pipeline = None
 _pipeline_lock = threading.Lock()
 
+# True once the LoRA adapter has been wrapped around the 512 flow model and its
+# weights loaded. False means every job runs as "base" regardless of what was
+# requested -- see _attach_adapter.
+_adapter_ready = False
+
 
 def is_pipeline_loaded() -> bool:
     return _pipeline is not None
+
+
+def adapter_available() -> bool:
+    return _adapter_ready
 
 
 def queue_depth() -> int:
@@ -57,7 +66,74 @@ def get_or_load_pipeline():
             t0 = time.time()
             _pipeline = load_pipeline(config.MODEL_ID, device=config.DEVICE)
             log.info("Pipeline loaded in %.0fs", time.time() - t0)
+            _attach_adapter(_pipeline)
     return _pipeline
+
+
+def _attach_adapter(pipeline) -> None:
+    """Wrap the 512 shape-SLat flow model in LoRA and load the fine-tuned weights.
+
+    Done once, at load. The adapter is left DISABLED here; each job turns it on
+    or off in _run_job. Because the low-rank branch is additive and B is
+    zero-initialised at construction, "disabled" is the stock model exactly, not
+    an approximation of it -- which is what makes offering "base" honest.
+
+    Only shape_slat_flow_model_512 is wrapped. The 1024 cascade model has
+    identical layer shapes and would swallow these weights silently, but it was
+    never trained with them.
+
+    A missing or unreadable adapter must NOT stop the server from booting: a lab
+    machine serving the untrained model is a far better failure than a lab
+    machine serving nothing. It degrades to base and says so loudly.
+    """
+    global _adapter_ready
+    try:
+        import torch
+        from trellis_core import lora
+
+        if not config.ADAPTER_PATH.exists():
+            log.warning("No adapter at %s -- every job will run the BASE model.",
+                        config.ADAPTER_PATH)
+            return
+
+        flow = pipeline.models["shape_slat_flow_model_512"]
+        adapted = lora.apply_lora(flow, rank=config.ADAPTER_RANK,
+                                  alpha=config.ADAPTER_ALPHA)
+        state = torch.load(config.ADAPTER_PATH, map_location="cpu")
+        loaded = lora.load_lora_state_dict(flow, state["lora"])
+        lora.set_lora_enabled(flow, False)
+
+        if loaded != len(state["lora"]):
+            log.warning("Adapter mismatch: %d/%d tensors matched a module. "
+                        "Falling back to BASE.", loaded, len(state["lora"]))
+            lora.set_lora_enabled(flow, False)
+            return
+
+        _adapter_ready = True
+        log.info("Adapter loaded: %s (%d modules, %d tensors, step %s)",
+                 config.ADAPTER_PATH.name, len(adapted), loaded,
+                 state.get("step", "?"))
+    except Exception:
+        log.exception("Could not attach the LoRA adapter -- serving BASE only.")
+
+
+def _set_variant(pipeline, variant: str) -> str:
+    """Enable or disable the adapter for the job about to run.
+
+    Mutating shared module state per job is only safe because worker_loop
+    processes exactly one job at a time on a single thread. If that ever becomes
+    concurrent, this needs a lock or a per-request copy of the model.
+
+    Returns the variant actually used, which is "base" whenever the adapter is
+    unavailable regardless of what was asked for.
+    """
+    from trellis_core import lora
+
+    if not _adapter_ready:
+        return "base"
+    flow = pipeline.models["shape_slat_flow_model_512"]
+    lora.set_lora_enabled(flow, variant == "tuned")
+    return variant
 
 
 def _run_printable(pipeline: str, *, glb_path: str, output_prefix: str):
@@ -144,6 +220,15 @@ def _run_job(store: JobStore, job_id: str) -> None:
     _record_timing(store, job_id, "preprocess", time.time() - t0)
 
     # --- Stage: GENERATING -------------------------------------------------
+    # Pick the weights first: this flips the LoRA adapter on the already-loaded
+    # flow model, so it must happen before run_generation, not inside it.
+    variant = _set_variant(pipeline, params.get("model_variant", config.MODEL_VARIANT))
+    if variant != params.get("model_variant", config.MODEL_VARIANT):
+        log.warning("Job %s asked for %r but the adapter is unavailable; ran base.",
+                    job_id, params.get("model_variant"))
+    store.update(job_id, params={**params, "model_variant_used": variant})
+    log.info("Job %s generating with the %s model", job_id, variant)
+
     store.update(job_id, status=JobStatus.GENERATING)
     t0 = time.time()
     try:
