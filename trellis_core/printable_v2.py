@@ -431,10 +431,56 @@ def to_manifold(vertices, faces, opts, notes):
         notes.append(msg)
 
     man, v, f = _manifold_with_repair(v, f, opts, notes)
-    if man is None:
-        raise RuntimeError("Manifold3D rejected even the remeshed geometry")
-    man, f = _ensure_positive(man, v, f, notes)
-    return man, v, f, True
+    if man is not None:
+        man, f = _ensure_positive(man, v, f, notes)
+        return man, v, f, True
+
+    # Last resort: binary voxel remesh, which is closed BY CONSTRUCTION.
+    #
+    # This rung exists because the SDF rebuild is not the guarantee it was
+    # assumed to be. On a badly broken input -- measured on a real failed job,
+    # 16.7% non-manifold and 4.8% open edges -- MeshLib's HoleWindingNumber
+    # cannot decide inside from outside over large regions, so the iso-surface
+    # it extracts comes back with 0.000% non-manifold edges but 22.5% OPEN
+    # ones. Manifold3D wants a CLOSED manifold and rejects it, and with no rung
+    # below this the whole job died with "Manifold3D rejected even the remeshed
+    # geometry" -- the user got nothing at all.
+    #
+    # trimesh's voxelization cannot produce an open surface: it fills a binary
+    # grid and marches it. On that same mesh it returned 0.000% non-manifold,
+    # 0.000% open, watertight, in 82s. Much heavier and it resamples the
+    # surface, which is why it is last and not first -- but a coarser model
+    # beats a failed job.
+    if opts.repair_backend == "meshlib":
+        msg = ("SDF rebuild was still open; falling back to the v1 voxel remesh "
+               "(guaranteed closed, but resamples the surface)")
+        print(f"  {msg}...")
+        notes.append(msg)
+        remeshed, _used = repair_watertight(tm, pitch, force_solid=True)
+        v, f = np.asarray(remeshed.vertices), np.asarray(remeshed.faces)
+
+        # The voxel remesh ignores the face budget entirely -- it returned 5.0M
+        # faces for a 1M target on the job this rung was written for, which is a
+        # 90 MB GLB and a 249 MB STL. Try the budget first and keep it only if
+        # the result is still a closed manifold, same rule as the rung above:
+        # correctness outranks file size, but not by default.
+        if len(f) > opts.target_faces:
+            vd, fd = _decimate_if_needed(v, f, opts.target_faces)
+            man, vd, fd = _manifold_with_repair(vd, fd, opts, notes)
+            if man is not None:
+                man, fd = _ensure_positive(man, vd, fd, notes)
+                return man, vd, fd, True
+            msg = (f"decimating the voxel remesh to {opts.target_faces:,} faces broke "
+                   f"manifoldness; keeping the full {len(f):,}-face mesh")
+            print(f"  {msg}")
+            notes.append(msg)
+
+        man, v, f = _manifold_with_repair(v, f, opts, notes)
+        if man is not None:
+            man, f = _ensure_positive(man, v, f, notes)
+            return man, v, f, True
+
+    raise RuntimeError("Manifold3D rejected even the remeshed geometry")
 
 
 def _extent_diagonal(man):

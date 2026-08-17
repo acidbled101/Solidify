@@ -144,7 +144,15 @@ def _fix_orientation_per_face(vertices, faces, notes, max_passes=2):
 def rebuild(vertices, faces, voxel_size, notes, close_holes=False):
     """Rebuild the mesh through a signed distance field (MeshLib rebuildMesh).
 
-    Always returns a closed surface. HoleWindingNumber sign detection tolerates
+    Returns a manifold surface, but NOT necessarily a CLOSED one. This docstring
+    used to promise "always returns a closed surface" and the caller relied on
+    it. Measured on a real failed job whose mesh had 16.7% non-manifold and 4.8%
+    open edges: HoleWindingNumber could not resolve inside from outside over
+    large regions, and the extracted surface came back 0.000% non-manifold but
+    22.5% OPEN. Manifold3D rejected it and the job died with no output at all.
+    Callers must keep a guaranteed-closed rung (voxel remesh) below this one.
+
+    HoleWindingNumber sign detection tolerates
     the holes and self-intersections that survive earlier stages -- but it reads
     the face winding, so fix_orientation() must have run first or the result is
     nonsense (measured: volume off by 2.4x and 5,921 disconnected bodies).
