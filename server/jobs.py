@@ -58,6 +58,14 @@ class Job:
     fidelity: Optional[dict] = None
     error: Optional[dict] = None
     timings: dict = field(default_factory=dict)
+    # Live sampler position: {"stage", "step", "total", "frac"}. Written from
+    # the generation thread on every sampling step, read by the polling UI, so
+    # the progress bar reflects where the model actually is rather than a curve
+    # fitted to elapsed time.
+    progress: Optional[dict] = None
+    # Basenames of coarse meshes decoded mid-generation, oldest first. These are
+    # also the allowlist for serving them (see get_job_file).
+    previews: list = field(default_factory=list)
 
     def status_text(self) -> str:
         return STATUS_TEXT.get(self.status, str(self.status))
@@ -86,6 +94,8 @@ class Job:
             "updated_at": self.updated_at,
             "elapsed_seconds": self.elapsed_seconds(),
             "timings": self.timings,
+            "progress": self.progress,
+            "previews": list(self.previews),
             "params": self.params,
             "result": self.result,
             "diagnostics": self.diagnostics,

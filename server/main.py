@@ -331,6 +331,10 @@ async def get_job_file(job_id: str, filename: str):
     known = set()
     if job.result and job.result.get("files"):
         known = {f["filename"] for f in job.result["files"]}
+    # In-flight previews are servable too, and they exist long before `result`
+    # does. They are recorded by the worker as basenames it wrote itself, so
+    # the allowlist property that prevents traversal still holds.
+    known.update(job.previews)
     if filename not in known:
         return _error(404, "Unknown file for this job.")
 

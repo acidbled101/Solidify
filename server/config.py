@@ -63,6 +63,26 @@ ADAPTER_PATH = Path(os.environ.get(
 ADAPTER_RANK = int(os.environ.get("TRELLIS_ADAPTER_RANK", "16"))
 ADAPTER_ALPHA = float(os.environ.get("TRELLIS_ADAPTER_ALPHA", "32"))
 
+# --- Live progress and in-flight previews ------------------------------------
+# The sampler already computes pred_x_0 -- its running estimate of the FINISHED
+# latent -- at every step, so showing the shape as it forms costs no extra
+# sampling. The only added work is decoding those snapshots, which is why the
+# preview resolution is far below the final mesh's and why there are only a
+# couple of them. Measure with bench_preview.py before raising either.
+#
+# Fractions of the shape-SLat stage at which to decode a preview. Empty list
+# disables previews and removes the hook entirely.
+# OFF by default, on evidence. bench_preview.py measured a decode-based preview
+# at 66.8s and 72.9s on a 1328s generation -- 11.8% overhead -- and the cost is
+# in the sparse convolution over occupied voxels, which lowering `resolution`
+# does not reduce. The structure voxels (see write_voxel_preview) give a real
+# picture of the shape for free instead. Set TRELLIS_PREVIEW_AT=0.5,0.85 to
+# re-enable decode previews if you decide the wait is worth it.
+PREVIEW_AT = tuple(
+    float(x) for x in os.environ.get("TRELLIS_PREVIEW_AT", "").split(",") if x.strip()
+)
+PREVIEW_RESOLUTION = int(os.environ.get("TRELLIS_PREVIEW_RESOLUTION", "128"))
+
 # --- make_printable defaults -----------------------------------------------
 PRINTABLE_TARGET_FACES = int(os.environ.get("TRELLIS_PRINTABLE_TARGET_FACES", "1000000"))
 PRINTABLE_OVERHANG_ANGLE = float(os.environ.get("TRELLIS_OVERHANG_ANGLE", "45.0"))

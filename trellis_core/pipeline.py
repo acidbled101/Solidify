@@ -90,7 +90,8 @@ def _free_memory():
 
 
 @torch.no_grad()
-def _run_geometry_only(pipeline, image, *, seed, pipeline_type, sampler_params):
+def _run_geometry_only(pipeline, image, *, seed, pipeline_type, sampler_params,
+                       on_structure=None):
     """Shape-only inference: mirror Trellis2ImageTo3DPipeline.run() but skip the
     texture-SLat sampling and texture decode.
 
@@ -121,6 +122,16 @@ def _run_geometry_only(pipeline, image, *, seed, pipeline_type, sampler_params):
     cond_1024 = pipeline.get_cond([img], 1024) if pipeline_type != "512" else None
 
     coords = pipeline.sample_sparse_structure(cond_512, ss_res[pipeline_type], 1, sampler_params)
+
+    # The occupied voxels are the object's silhouette, and they are final from
+    # here on -- shape sampling only refines the per-voxel latent. Handing them
+    # out now lets the UI show the real shape minutes before the mesh exists,
+    # for the cost of a CPU-side box mesh. Never let a preview break a job.
+    if on_structure is not None:
+        try:
+            on_structure(coords, ss_res[pipeline_type])
+        except Exception:
+            pass
 
     models = pipeline.models
     if pipeline_type == "512":
@@ -174,6 +185,7 @@ def run_generation(
     skip_texture: bool = False,
     out_glb_path: str,
     out_obj_path: str,
+    on_structure=None,
 ) -> GenerationResult:
     """Run TRELLIS.2 generation + (optional) texture bake, writing GLB/OBJ.
 
@@ -197,7 +209,7 @@ def run_generation(
         if skip_texture:
             mesh_out = _run_geometry_only(
                 pipeline, image, seed=seed, pipeline_type=pipeline_type,
-                sampler_params=sampler_overrides,
+                sampler_params=sampler_overrides, on_structure=on_structure,
             )
         else:
             outputs = pipeline.run(

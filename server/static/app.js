@@ -28,6 +28,7 @@
     seed: "", detail: 1000000, quality: "standard", skipPrep: false, skipTexture: false,
     printablePipeline: "v3", advOpen: false,
     modelVariant: "tuned", adapterAvailable: true,
+    previewName: "", formingSrc: null, progDetail: "",
     prog: 0, stageIdx: -1, log: [], queuePos: 0, busyReason: "", errMsg: "", errHint: "", dragOver: false,
     jobId: "",
     infoRows: null, diagRows: null, previewSrc: null, previewPath: null, libDraft: null,
@@ -707,14 +708,16 @@
         '<div style="flex:1"></div>' +
         '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">' +
           '<div style="font-size:clamp(44px,6vw,64px);font-weight:700;color:#35F2E2;text-shadow:0 0 28px rgba(53,242,226,.5);line-height:1"><span id="prog-int">' + v.progInt + '</span><span style="font-size:.5em">%</span></div>' +
+          '<div id="prog-detail" style="font-family:\'IBM Plex Mono\',monospace;font-size:11px;letter-spacing:.12em;color:#3f7a73;min-height:14px">' + esc(state.progDetail) + '</div>' +
           '<div style="font-family:\'IBM Plex Mono\',monospace;font-size:13px;letter-spacing:.2em;color:#57c9bf">⏱ ELAPSED <span id="elapsed" style="color:#EAFDFB">' + fmtDuration(currentElapsed()) + '</span></div>' +
         '</div>' +
       '</div>' +
       '<div id="stage-row" style="display:flex;flex-wrap:wrap;gap:10px">' + stageChips(v) + '</div>' +
       '<div style="height:10px;border:1px solid rgba(53,242,226,.35);overflow:hidden;background:rgba(4,28,26,.6)"><div id="bar-fill" style="' + v.barFill + '"></div></div>' +
       '<div style="display:flex;flex-wrap:wrap;gap:28px;align-items:stretch">' +
-        '<div data-lenis-prevent style="flex:1 1 380px;min-height:320px;border:1px solid rgba(53,242,226,.22);background:radial-gradient(circle at 50% 45%, rgba(20,217,201,.09), transparent 65%)">' +
-          '<model-preview data-mp mode="forming" progress="' + v.progInt + '" autorotate="true" style="width:100%;height:100%;min-height:320px"></model-preview>' +
+        '<div data-lenis-prevent style="position:relative;flex:1 1 380px;min-height:320px;border:1px solid rgba(53,242,226,.22);background:radial-gradient(circle at 50% 45%, rgba(20,217,201,.09), transparent 65%)">' +
+          '<model-preview data-mp mode="' + (state.formingSrc ? 'orbit' : 'forming') + '" progress="' + v.progInt + '" autorotate="true"' + (state.formingSrc ? ' src="' + state.formingSrc + '"' : '') + ' style="width:100%;height:100%;min-height:320px"></model-preview>' +
+          (state.formingSrc ? '<div style="position:absolute;left:14px;bottom:12px;font-family:\'IBM Plex Mono\',monospace;font-size:10px;letter-spacing:.2em;color:#57c9bf;pointer-events:none">STRUCTURE PREVIEW — DRAG TO ROTATE</div>' : '') +
         '</div>' +
         '<div style="flex:1 1 300px;display:flex;flex-direction:column;gap:12px">' +
           '<div style="font-family:\'IBM Plex Mono\',monospace;font-size:10px;letter-spacing:.26em;color:#57c9bf">LIVE FEED</div>' +
@@ -779,6 +782,7 @@
   function patchRunning() {
     var v = vals();
     var pi = appEl.querySelector("#prog-int"); if (pi) pi.textContent = v.progInt;
+    var pd = appEl.querySelector("#prog-detail"); if (pd) pd.textContent = state.progDetail;
     var bf = appEl.querySelector("#bar-fill"); if (bf) bf.style.width = state.prog + "%";
     var sr = appEl.querySelector("#stage-row"); if (sr) sr.innerHTML = stageChips(v);
     var lf = appEl.querySelector("#log-feed"); if (lf) lf.innerHTML = logLinesHTML();
@@ -825,6 +829,7 @@
     localStorage.removeItem(LS_KEY);
     Object.assign(state, {
       log: [], prog: 0, stageIdx: -1, errMsg: "", errHint: "", busyReason: "", jobId: "",
+      previewName: "", formingSrc: null, progDetail: "",
       previewSrc: null, previewPath: null, libDraft: null,
       dlSTL: null, dlSTLName: "", dlGLB: null, dlGLBName: "",
       jobElapsed: null, _elapsedAnchor: 0,
@@ -858,6 +863,7 @@
     if (DEMO) return simGenerate();
     if (!state.photoFile) return;
     state.log = []; state.prog = 0; state.stageIdx = -1; state.errMsg = ""; state.errHint = "";
+    state.previewName = ""; state.formingSrc = null; state.progDetail = "";
     var fd = new FormData();
     fd.append("image", state.photoFile);
     if (state.seed !== "") fd.append("seed", state.seed);
@@ -1040,17 +1046,57 @@
     if (!state.jobId) state.jobId = shortId(id);
     if (idx !== state.stageIdx) pushLog(stageLog(st));
     state.stageIdx = idx;
-    state.prog = progFor(idx, job.elapsed_seconds || 0);
+    state.prog = progFor(idx, job.elapsed_seconds || 0, job.progress);
+    state.progDetail = progDetail(job.progress);
+    adoptPreview(id, job);
     // Anchor the live timer to the server's authoritative elapsed each poll.
     state.jobElapsed = job.elapsed_seconds || 0;
     state._elapsedAnchor = nowMs();
     if (!wasRunning) render(); else patchRunning();
   }
 
-  function progFor(idx, elapsed) {
+  // Stage boundaries on the bar. GENERATING owns 12..88 because it is by far
+  // the longest stage and the only one that reports real progress.
+  var GEN_LO = 12, GEN_HI = 88;
+
+  function progFor(idx, elapsed, prog) {
+    // Real position from the samplers when we have it. `overall` already
+    // accounts for a cascade running the shape sampler twice, so it never
+    // rewinds; the elapsed-time curve below is only the fallback for a server
+    // that has not reported yet (or an older one that cannot).
+    if (idx === 2 && prog && typeof prog.overall === "number") {
+      return GEN_LO + (GEN_HI - GEN_LO) * Math.max(0, Math.min(1, prog.overall));
+    }
     var base = [8, 28, 55, 92][idx] || 5;
-    if (idx === 2) return Math.min(88, 55 + elapsed * 0.6); // grow through the long generating stage
+    if (idx === 2) return Math.min(88, 55 + elapsed * 0.6);
     return base;
+  }
+
+  // Name the sampler stage under the percentage, so "62%" says what it is doing.
+  var STAGE_TEXT = {
+    structure: "Forming the voxel structure",
+    shape: "Refining the shape latent",
+    texture: "Sampling texture",
+    sampling: "Sampling",
+  };
+  function progDetail(prog) {
+    if (!prog || !prog.total) return "";
+    return (STAGE_TEXT[prog.stage] || prog.stage) + " — step " + prog.step + " of " + prog.total;
+  }
+
+  // Load the newest in-flight preview into the forming viewer. Fetched as an
+  // authed blob like the final model, since job files sit behind the same auth.
+  function adoptPreview(id, job) {
+    var list = job.previews || [];
+    if (!list.length) return;
+    var newest = list[list.length - 1];
+    if (state.previewName === newest) return;   // already showing this one
+    state.previewName = newest;
+    apiFileURL("/api/jobs/" + id + "/files/" + newest).then(function (url) {
+      state.formingSrc = url;
+      var mp = appEl.querySelector("[data-mp]");
+      if (mp) { mp.setAttribute("mode", "orbit"); mp.setAttribute("src", url); }
+    }).catch(function () { /* a preview is optional; never surface a failure */ });
   }
   function pushLog(line) { state.log = state.log.concat([line]).slice(-7); }
 

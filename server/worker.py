@@ -229,21 +229,62 @@ def _run_job(store: JobStore, job_id: str) -> None:
     store.update(job_id, params={**params, "model_variant_used": variant})
     log.info("Job %s generating with the %s model", job_id, variant)
 
-    store.update(job_id, status=JobStatus.GENERATING)
+    store.update(job_id, status=JobStatus.GENERATING, progress=None, previews=[])
     t0 = time.time()
+
+    # Real progress + in-flight shape previews. The callbacks run on this
+    # thread, inside the sampling loop, so they must be cheap and must never
+    # raise -- progress.instrumented already swallows callback failures, and
+    # store.update is a dict write under a lock.
+    from trellis_core import progress as progress_mod
+
+    def on_step(stage, step, total, overall):
+        store.update(job_id, progress={
+            "stage": stage, "step": step, "total": total, "overall": overall,
+        })
+
+    def _add_preview(name):
+        job_now = store.get(job_id)
+        if name not in job_now.previews:
+            store.update(job_id, previews=list(job_now.previews) + [name])
+
+    def on_preview(path, step):
+        _add_preview(os.path.basename(path))
+
+    def on_structure(coords, grid):
+        name = "preview_structure.glb"
+        if progress_mod.write_voxel_preview(coords, os.path.join(output_dir, name), grid=grid):
+            _add_preview(name)
+
+    # How many sampler progress bars this pipeline_type will produce. Measured,
+    # not assumed: a 1024_cascade run reports three (structure, then the shape
+    # sampler twice). Used only to keep the overall fraction monotonic.
+    ptype = params.get("pipeline_type", config.DEFAULT_PIPELINE_TYPE)
+    expected_bars = 3 if "cascade" in ptype else 2
+
     try:
-        gen = run_generation(
+        with progress_mod.instrumented(
             pipeline,
-            img,
-            seed=int(params.get("seed", config.DEFAULT_SEED)),
-            pipeline_type=params.get("pipeline_type", config.DEFAULT_PIPELINE_TYPE),
-            target_faces=int(params.get("target_faces", config.DEFAULT_TARGET_FACES)),
-            texture_size=int(params.get("texture_size", config.DEFAULT_TEXTURE_SIZE)),
-            no_texture=config.NO_TEXTURE,
-            skip_texture=bool(params.get("skip_texture", config.SKIP_TEXTURE_BY_DEFAULT)),
-            out_glb_path=glb_path,
-            out_obj_path=obj_path,
-        )
+            on_step=on_step,
+            on_preview=on_preview,
+            expected_bars=expected_bars,
+            preview_at=config.PREVIEW_AT,
+            preview_resolution=config.PREVIEW_RESOLUTION,
+            preview_dir=output_dir,
+        ):
+            gen = run_generation(
+                pipeline,
+                img,
+                on_structure=on_structure,
+                seed=int(params.get("seed", config.DEFAULT_SEED)),
+                pipeline_type=params.get("pipeline_type", config.DEFAULT_PIPELINE_TYPE),
+                target_faces=int(params.get("target_faces", config.DEFAULT_TARGET_FACES)),
+                texture_size=int(params.get("texture_size", config.DEFAULT_TEXTURE_SIZE)),
+                no_texture=config.NO_TEXTURE,
+                skip_texture=bool(params.get("skip_texture", config.SKIP_TEXTURE_BY_DEFAULT)),
+                out_glb_path=glb_path,
+                out_obj_path=obj_path,
+            )
     except WatchdogError as e:
         # The known macOS GPU-watchdog signature. Its str() IS the full,
         # multi-line, numbered workaround text the CLI prints; surface it
