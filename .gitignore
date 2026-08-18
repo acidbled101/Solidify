@@ -35,3 +35,35 @@ server.log
 # 300 curated Thingi10K objects, 8.7 epochs.
 adapters/
 watchdog.log
+# devlab/ (DPO Inspector) run traces: each real run can export multi-MB
+# candidate GLBs (on top of *.glb already being ignored above, trace.jsonl
+# itself isn't) -- keep per-run output out of git, same as jobs/ above.
+# The synthetic-demo trace is a bundled, tiny (~100KB) example that exercises
+# the real geometric_judge scoring path without needing a GPU or a 20min
+# run -- kept, same pattern as the specimen-042.stl carve-out above.
+devlab/traces/*/
+!devlab/traces/synthetic-demo/
+!devlab/traces/synthetic-demo/*.glb
+!devlab/traces/synthetic-demo/*.stl
+!devlab/traces/synthetic-demo/output/
+!devlab/traces/synthetic-demo/output/*.glb
+!devlab/traces/synthetic-demo/output/*.stl
+!devlab/traces/synthetic-demo/output/*.obj
+
+# JIT-built CPU extension (see backends/dual_grid_cpu.py)
+.build/
+
+# training run artifacts (metrics, checkpoints, samples)
+runs/
+
+# built datasets (latents, conditioning images, embeddings)
+data/
+
+# The SFT dataset itself is ignored above (data/), but its manifest is the
+# index that DEFINES it: 300 records pinning each object by Thingi10K file_id,
+# with its licence and token count. dataset_build.py is seeded, so the manifest
+# plus one command reproduces the corpus -- and shipping an index rather than
+# other people's models sidesteps their per-object licences entirely.
+!data/thingi10k_sft/
+!data/thingi10k_sft/manifest.jsonl
+!data/thingi10k_sft/ATTRIBUTION.md

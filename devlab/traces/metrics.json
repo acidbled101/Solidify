@@ -1,0 +1,3162 @@
+{
+ "summary": {
+  "n_runs": 17,
+  "n_runs_ok": 10,
+  "n_synthetic_excluded": 1,
+  "n_branches": 21,
+  "n_branches_scored": 17,
+  "n_verdict_flipped": 5,
+  "flip_rate": 0.2941,
+  "mean_gain_perturbation": -0.025075,
+  "mean_gain_steering": -0.00265,
+  "stderr_gain_steering": 0.007848,
+  "steering_significant": false,
+  "n_steering_positive": 8,
+  "n_steering_negative": 9,
+  "interpretation": "flip_rate is the headline: the fraction of forks where gradient steering CHANGED the judge's preferred branch. If it stays ~0 as n grows, the gradient is not contributing beyond the random perturbation and best-of-N sampling would dominate at lower cost. mean_gain_steering separates what the gradient bought from what the random draw bought (mean_gain_perturbation). Compare mean_gain_steering against stderr_gain_steering before reading anything into its sign."
+ },
+ "runs": [
+  {
+   "run_id": "20260731-183220-bfc42a",
+   "status": "error",
+   "is_synthetic": false,
+   "error": "MPS backend out of memory (MPS allocated: 35.91 GiB, other allocations: 15.66 MiB, max allowed: 36.27 GiB). Tried to allocate 373.91 MiB on shared pool. Use PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.0 to disable upper limit for memory allocations (may cause system failure).",
+   "started_at": 1785515540.407006,
+   "duration_seconds": 411.6,
+   "image": "image.png",
+   "pipeline_type": "512",
+   "steps_requested": null,
+   "steps_actual": 12,
+   "seed": 42,
+   "target_faces": 1000000,
+   "num_branches_requested": null,
+   "num_branches_actual": 1,
+   "model_id": "microsoft/TRELLIS.2-4B",
+   "pid": 28891,
+   "n_events": 18,
+   "has_latent_telemetry": false,
+   "watertight": null,
+   "vertex_count": null,
+   "face_count": null,
+   "generation_seconds": null,
+   "postprocess_seconds": null,
+   "overhang_pct": null,
+   "chamfer": null,
+   "hausdorff": null,
+   "volume_change_pct": null,
+   "vanilla_seconds": null,
+   "vanilla_face_count": null,
+   "branches": [
+    {
+     "branch_index": 0,
+     "scores": {
+      "reference": 0.13574612432142638,
+      "delta_initial": 0.14575101051525682
+     },
+     "cmp": {
+      "reference": 0.13574612432142638,
+      "delta_initial": 0.14575101051525682
+     },
+     "loss_history": [],
+     "proxy_history": [],
+     "rms_history": [],
+     "n_grad_steps": 0,
+     "latent_path": {},
+     "branch_t": 0.6818181818181819,
+     "resume_t": 0.6,
+     "i_branch": 7,
+     "k": 1,
+     "n_voxels": 2858,
+     "out_of_window": false,
+     "branch_noise_scale": 0.02,
+     "trust_region": 0.06,
+     "thickness_valid_ref": true,
+     "watertight_ref": false,
+     "breakdown": {
+      "reference": {
+       "detail_reward": 0.4775499312197801,
+       "overhang_penalty": 0.1695502828719273,
+       "thickness_penalty": 0.16016346509739748,
+       "topology_penalty": 0.24180117858057903
+      },
+      "delta_initial": {
+       "detail_reward": 0.5290710853797862,
+       "overhang_penalty": 0.16926677773393825,
+       "thickness_penalty": 0.2019685246601564,
+       "topology_penalty": 0.24169544940869372
+      }
+     },
+     "delta_won_initial": true,
+     "delta_won_final": null,
+     "verdict_flipped": null,
+     "gain_perturbation": 0.010004886193830442,
+     "gain_steering": null,
+     "gain_total": null,
+     "loss_first": null,
+     "loss_last": null,
+     "rms_first": null,
+     "rms_last": null,
+     "proxy_first": null,
+     "proxy_last": null,
+     "latent_steps_traced": 0
+    }
+   ]
+  },
+  {
+   "run_id": "20260731-184420-710bd1",
+   "status": "ok",
+   "is_synthetic": false,
+   "error": null,
+   "started_at": 1785516261.522004,
+   "duration_seconds": 2440.4,
+   "image": "image.png",
+   "pipeline_type": "512",
+   "steps_requested": null,
+   "steps_actual": 12,
+   "seed": 42,
+   "target_faces": 1000000,
+   "num_branches_requested": null,
+   "num_branches_actual": 1,
+   "model_id": "microsoft/TRELLIS.2-4B",
+   "pid": 29499,
+   "n_events": 33,
+   "has_latent_telemetry": false,
+   "watertight": false,
+   "vertex_count": 501570,
+   "face_count": 1000000,
+   "generation_seconds": 1328.2479238510132,
+   "postprocess_seconds": 99.84680604934692,
+   "overhang_pct": 17.276116619105668,
+   "chamfer": 0.009135516859532667,
+   "hausdorff": 0.17913012391778538,
+   "volume_change_pct": null,
+   "vanilla_seconds": 921.4056658744812,
+   "vanilla_face_count": 1541082,
+   "branches": [
+    {
+     "branch_index": 0,
+     "scores": {
+      "reference": 0.35182976385610254,
+      "delta_initial": 0.381029390533358,
+      "delta_final": 0.3937767900246947
+     },
+     "cmp": {
+      "reference": 0.35182976385610254,
+      "delta_initial": 0.381029390533358,
+      "delta_final": 0.3937767900246947
+     },
+     "loss_history": [
+      0.8677016496658325,
+      0.8161635398864746,
+      0.771626353263855
+     ],
+     "proxy_history": [
+      799.1412963867188,
+      799.2318725585938,
+      799.3131713867188
+     ],
+     "rms_history": [
+      0.020059267058968544,
+      0.020059408619999886,
+      0.020059674978256226
+     ],
+     "n_grad_steps": 3,
+     "latent_path": {},
+     "branch_t": 0.5,
+     "resume_t": 0.3750000000000001,
+     "i_branch": 9,
+     "k": 1,
+     "n_voxels": 2858,
+     "out_of_window": false,
+     "branch_noise_scale": 0.02,
+     "trust_region": 0.06,
+     "thickness_valid_ref": true,
+     "watertight_ref": false,
+     "breakdown": {
+      "reference": {
+       "detail_reward": 0.6124960519330556,
+       "overhang_penalty": 0.1667160472456058,
+       "thickness_penalty": 0.08421147263077106,
+       "topology_penalty": 0.1947753640115238
+      },
+      "delta_initial": {
+       "detail_reward": 0.6131207411201599,
+       "overhang_penalty": 0.16554977997084996,
+       "thickness_penalty": 0.05671555806603752,
+       "topology_penalty": 0.19652025099828865
+      },
+      "delta_final": {
+       "detail_reward": 0.6104140741850828,
+       "overhang_penalty": 0.16547340472260846,
+       "thickness_penalty": 0.041291846726614685,
+       "topology_penalty": 0.19744065422329915
+      }
+     },
+     "proxy_reference": 799.4644165039062,
+     "resumed_from": "delta",
+     "delta_won_initial": true,
+     "delta_won_final": true,
+     "verdict_flipped": false,
+     "gain_perturbation": 0.029199626677255452,
+     "gain_steering": 0.012747399491336686,
+     "gain_total": 0.04194702616859214,
+     "loss_first": 0.8677016496658325,
+     "loss_last": 0.771626353263855,
+     "rms_first": 0.020059267058968544,
+     "rms_last": 0.020059674978256226,
+     "proxy_first": 799.1412963867188,
+     "proxy_last": 799.3131713867188,
+     "latent_steps_traced": 0
+    }
+   ]
+  },
+  {
+   "run_id": "20260803-121207-c9e79f",
+   "status": "incomplete",
+   "is_synthetic": false,
+   "error": null,
+   "started_at": 1785751928.223362,
+   "duration_seconds": 0.6,
+   "image": "image.png",
+   "pipeline_type": "512",
+   "steps_requested": null,
+   "steps_actual": null,
+   "seed": 42,
+   "target_faces": 1000000,
+   "num_branches_requested": null,
+   "num_branches_actual": 0,
+   "model_id": "microsoft/TRELLIS.2-4B",
+   "pid": 68595,
+   "n_events": 2,
+   "has_latent_telemetry": false,
+   "watertight": null,
+   "vertex_count": null,
+   "face_count": null,
+   "generation_seconds": null,
+   "postprocess_seconds": null,
+   "overhang_pct": null,
+   "chamfer": null,
+   "hausdorff": null,
+   "volume_change_pct": null,
+   "vanilla_seconds": null,
+   "vanilla_face_count": null,
+   "branches": []
+  },
+  {
+   "run_id": "20260803-122458-d879eb",
+   "status": "error",
+   "is_synthetic": false,
+   "error": "MPS backend out of memory (MPS allocated: 36.09 GiB, other allocations: 15.44 MiB, max allowed: 36.27 GiB). Tried to allocate 360.17 MiB on shared pool. Use PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.0 to disable upper limit for memory allocations (may cause system failure).",
+   "started_at": 1785752698.662113,
+   "duration_seconds": 392.2,
+   "image": "image.png",
+   "pipeline_type": "512",
+   "steps_requested": 10,
+   "steps_actual": 10,
+   "seed": 42,
+   "target_faces": 1000000,
+   "num_branches_requested": null,
+   "num_branches_actual": 1,
+   "model_id": "microsoft/TRELLIS.2-4B",
+   "pid": 69044,
+   "n_events": 18,
+   "has_latent_telemetry": false,
+   "watertight": null,
+   "vertex_count": null,
+   "face_count": null,
+   "generation_seconds": null,
+   "postprocess_seconds": null,
+   "overhang_pct": null,
+   "chamfer": null,
+   "hausdorff": null,
+   "volume_change_pct": null,
+   "vanilla_seconds": null,
+   "vanilla_face_count": null,
+   "branches": [
+    {
+     "branch_index": 0,
+     "scores": {
+      "reference": 0.27127376657800195,
+      "delta_initial": 0.30055147808418065
+     },
+     "cmp": {
+      "reference": 0.27127376657800195,
+      "delta_initial": 0.30055147808418065
+     },
+     "loss_history": [],
+     "proxy_history": [],
+     "rms_history": [],
+     "n_grad_steps": 0,
+     "latent_path": {},
+     "branch_t": 0.5624999999999999,
+     "resume_t": 0.24999999999999994,
+     "i_branch": 7,
+     "k": 2,
+     "n_voxels": 2805,
+     "out_of_window": false,
+     "branch_noise_scale": 0.04,
+     "trust_region": 0.12,
+     "thickness_valid_ref": true,
+     "watertight_ref": false,
+     "breakdown": {
+      "reference": {
+       "detail_reward": 0.5002237488534247,
+       "overhang_penalty": 0.1509201766409613,
+       "thickness_penalty": 0.06901584925646324,
+       "topology_penalty": 0.18027912755996361
+      },
+      "delta_initial": {
+       "detail_reward": 0.5279962848958129,
+       "overhang_penalty": 0.1501881204033811,
+       "thickness_penalty": 0.06816134724165661,
+       "topology_penalty": 0.18190678333188948
+      }
+     },
+     "delta_won_initial": true,
+     "delta_won_final": null,
+     "verdict_flipped": null,
+     "gain_perturbation": 0.029277711506178694,
+     "gain_steering": null,
+     "gain_total": null,
+     "loss_first": null,
+     "loss_last": null,
+     "rms_first": null,
+     "rms_last": null,
+     "proxy_first": null,
+     "proxy_last": null,
+     "latent_steps_traced": 0
+    }
+   ]
+  },
+  {
+   "run_id": "20260803-123355-b733d9",
+   "status": "error",
+   "is_synthetic": false,
+   "error": "MPS backend out of memory (MPS allocated: 36.14 GiB, other allocations: 15.42 MiB, max allowed: 36.27 GiB). Tried to allocate 360.17 MiB on shared pool. Use PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.0 to disable upper limit for memory allocations (may cause system failure).",
+   "started_at": 1785753235.709841,
+   "duration_seconds": 393.7,
+   "image": "image.png",
+   "pipeline_type": "512",
+   "steps_requested": 10,
+   "steps_actual": 10,
+   "seed": 42,
+   "target_faces": 1000000,
+   "num_branches_requested": null,
+   "num_branches_actual": 1,
+   "model_id": "microsoft/TRELLIS.2-4B",
+   "pid": 69441,
+   "n_events": 18,
+   "has_latent_telemetry": false,
+   "watertight": null,
+   "vertex_count": null,
+   "face_count": null,
+   "generation_seconds": null,
+   "postprocess_seconds": null,
+   "overhang_pct": null,
+   "chamfer": null,
+   "hausdorff": null,
+   "volume_change_pct": null,
+   "vanilla_seconds": null,
+   "vanilla_face_count": null,
+   "branches": [
+    {
+     "branch_index": 0,
+     "scores": {
+      "reference": 0.27127376657800195,
+      "delta_initial": 0.3088179853433823
+     },
+     "cmp": {
+      "reference": 0.27127376657800195,
+      "delta_initial": 0.3088179853433823
+     },
+     "loss_history": [],
+     "proxy_history": [],
+     "rms_history": [],
+     "n_grad_steps": 0,
+     "latent_path": {},
+     "branch_t": 0.5624999999999999,
+     "resume_t": 0.24999999999999994,
+     "i_branch": 7,
+     "k": 2,
+     "n_voxels": 2805,
+     "out_of_window": false,
+     "branch_noise_scale": 0.02,
+     "trust_region": 0.06,
+     "thickness_valid_ref": true,
+     "watertight_ref": false,
+     "breakdown": {
+      "reference": {
+       "detail_reward": 0.5002237488534247,
+       "overhang_penalty": 0.1509201766409613,
+       "thickness_penalty": 0.06901584925646324,
+       "topology_penalty": 0.18027912755996361
+      },
+      "delta_initial": {
+       "detail_reward": 0.5228890256884877,
+       "overhang_penalty": 0.14905217332752219,
+       "thickness_penalty": 0.05606020616688692,
+       "topology_penalty": 0.17917321701392733
+      }
+     },
+     "delta_won_initial": true,
+     "delta_won_final": null,
+     "verdict_flipped": null,
+     "gain_perturbation": 0.03754421876538033,
+     "gain_steering": null,
+     "gain_total": null,
+     "loss_first": null,
+     "loss_last": null,
+     "rms_first": null,
+     "rms_last": null,
+     "proxy_first": null,
+     "proxy_last": null,
+     "latent_steps_traced": 0
+    }
+   ]
+  },
+  {
+   "run_id": "20260803-131330-b64580",
+   "status": "error",
+   "is_synthetic": false,
+   "error": "MPS backend out of memory (MPS allocated: 36.17 GiB, other allocations: 1.70 MiB, max allowed: 36.27 GiB). Tried to allocate 373.91 MiB on shared pool. Use PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.0 to disable upper limit for memory allocations (may cause system failure).",
+   "started_at": 1785755611.127135,
+   "duration_seconds": 421.7,
+   "image": "image.png",
+   "pipeline_type": "512",
+   "steps_requested": null,
+   "steps_actual": 12,
+   "seed": 42,
+   "target_faces": 1000000,
+   "num_branches_requested": 1,
+   "num_branches_actual": 1,
+   "model_id": "microsoft/TRELLIS.2-4B",
+   "pid": 71435,
+   "n_events": 20,
+   "has_latent_telemetry": false,
+   "watertight": null,
+   "vertex_count": null,
+   "face_count": null,
+   "generation_seconds": null,
+   "postprocess_seconds": null,
+   "overhang_pct": null,
+   "chamfer": null,
+   "hausdorff": null,
+   "volume_change_pct": null,
+   "vanilla_seconds": null,
+   "vanilla_face_count": null,
+   "branches": [
+    {
+     "branch_index": 0,
+     "scores": {
+      "reference": 0.31240557836432703,
+      "delta_initial": 0.3677168796138522
+     },
+     "cmp": {
+      "reference": 0.31240557836432703,
+      "delta_initial": 0.3677168796138522
+     },
+     "loss_history": [],
+     "proxy_history": [],
+     "rms_history": [],
+     "n_grad_steps": 0,
+     "latent_path": {},
+     "branch_t": 0.5,
+     "resume_t": 0.21428571428571436,
+     "i_branch": 9,
+     "k": 2,
+     "n_voxels": 2858,
+     "out_of_window": false,
+     "branch_noise_scale": 0.02,
+     "trust_region": 0.06,
+     "thickness_valid_ref": true,
+     "watertight_ref": false,
+     "breakdown": {
+      "reference": {
+       "detail_reward": 0.5634847055029253,
+       "overhang_penalty": 0.1655949298770064,
+       "thickness_penalty": 0.07572069810117993,
+       "topology_penalty": 0.19526998320823807
+      },
+      "delta_initial": {
+       "detail_reward": 0.5776659852583947,
+       "overhang_penalty": 0.16603669002363836,
+       "thickness_penalty": 0.03419226456057689,
+       "topology_penalty": 0.19440302120654596
+      }
+     },
+     "delta_won_initial": true,
+     "delta_won_final": null,
+     "verdict_flipped": null,
+     "gain_perturbation": 0.05531130124952516,
+     "gain_steering": null,
+     "gain_total": null,
+     "loss_first": null,
+     "loss_last": null,
+     "rms_first": null,
+     "rms_last": null,
+     "proxy_first": null,
+     "proxy_last": null,
+     "latent_steps_traced": 0
+    }
+   ]
+  },
+  {
+   "run_id": "20260803-132911-76e2bb",
+   "status": "ok",
+   "is_synthetic": false,
+   "error": null,
+   "started_at": 1785756552.211712,
+   "duration_seconds": 735.3,
+   "image": "image.png",
+   "pipeline_type": "512",
+   "steps_requested": null,
+   "steps_actual": 12,
+   "seed": 42,
+   "target_faces": 1000000,
+   "num_branches_requested": 1,
+   "num_branches_actual": 1,
+   "model_id": "microsoft/TRELLIS.2-4B",
+   "pid": 72384,
+   "n_events": 31,
+   "has_latent_telemetry": false,
+   "watertight": false,
+   "vertex_count": 501387,
+   "face_count": 1000000,
+   "generation_seconds": 548.9444479942322,
+   "postprocess_seconds": 96.8502368927002,
+   "overhang_pct": 18.968469020930446,
+   "chamfer": 0.008696541930159937,
+   "hausdorff": 0.1823665195846034,
+   "volume_change_pct": null,
+   "vanilla_seconds": null,
+   "vanilla_face_count": null,
+   "branches": [
+    {
+     "branch_index": 0,
+     "scores": {
+      "reference": 0.31240557836432703,
+      "delta_initial": 0.3677168796138522,
+      "delta_final": 0.40566323231301765
+     },
+     "cmp": {
+      "reference": 0.31240557836432703,
+      "delta_initial": 0.3677168796138522,
+      "delta_final": 0.40566323231301765
+     },
+     "loss_history": [
+      0.9432564377784729,
+      0.8742316365242004,
+      0.8280685544013977
+     ],
+     "proxy_history": [
+      829.7769165039062,
+      829.892578125,
+      829.97314453125
+     ],
+     "rms_history": [
+      0.020059384405612946,
+      0.020059701055288315,
+      0.020060190930962563
+     ],
+     "n_grad_steps": 3,
+     "latent_path": {},
+     "branch_t": 0.5,
+     "resume_t": 0.21428571428571436,
+     "i_branch": 9,
+     "k": 2,
+     "n_voxels": 2858,
+     "out_of_window": false,
+     "branch_noise_scale": 0.02,
+     "trust_region": 0.06,
+     "thickness_valid_ref": true,
+     "watertight_ref": false,
+     "breakdown": {
+      "reference": {
+       "detail_reward": 0.5634847055029253,
+       "overhang_penalty": 0.1655949298770064,
+       "thickness_penalty": 0.07572069810117993,
+       "topology_penalty": 0.19526998320823807
+      },
+      "delta_initial": {
+       "detail_reward": 0.5776659852583947,
+       "overhang_penalty": 0.16603669002363836,
+       "thickness_penalty": 0.03419226456057689,
+       "topology_penalty": 0.19440302120654596
+      },
+      "delta_final": {
+       "detail_reward": 0.6469462251145173,
+       "overhang_penalty": 0.16603255921925697,
+       "thickness_penalty": 0.0655276219623206,
+       "topology_penalty": 0.19445623239844143
+      }
+     },
+     "proxy_reference": 830.2269287109375,
+     "resumed_from": "delta",
+     "delta_won_initial": true,
+     "delta_won_final": true,
+     "verdict_flipped": false,
+     "gain_perturbation": 0.05531130124952516,
+     "gain_steering": 0.037946352699165464,
+     "gain_total": 0.09325765394869062,
+     "loss_first": 0.9432564377784729,
+     "loss_last": 0.8280685544013977,
+     "rms_first": 0.020059384405612946,
+     "rms_last": 0.020060190930962563,
+     "proxy_first": 829.7769165039062,
+     "proxy_last": 829.97314453125,
+     "latent_steps_traced": 0
+    }
+   ]
+  },
+  {
+   "run_id": "20260803-134823-b69518",
+   "status": "ok",
+   "is_synthetic": false,
+   "error": null,
+   "started_at": 1785757704.452852,
+   "duration_seconds": 1162.4,
+   "image": "image.png",
+   "pipeline_type": "512",
+   "steps_requested": null,
+   "steps_actual": 12,
+   "seed": 42,
+   "target_faces": 1000000,
+   "num_branches_requested": 2,
+   "num_branches_actual": 2,
+   "model_id": "microsoft/TRELLIS.2-4B",
+   "pid": 74396,
+   "n_events": 37,
+   "has_latent_telemetry": false,
+   "watertight": false,
+   "vertex_count": 501668,
+   "face_count": 1000000,
+   "generation_seconds": 972.3461570739746,
+   "postprocess_seconds": 99.57068800926208,
+   "overhang_pct": 16.917889727094142,
+   "chamfer": 0.010288040988161329,
+   "hausdorff": 0.17218787049742942,
+   "volume_change_pct": null,
+   "vanilla_seconds": null,
+   "vanilla_face_count": null,
+   "branches": [
+    {
+     "branch_index": 0,
+     "scores": {
+      "reference": 0.1883560210752756,
+      "delta_initial": 0.1988301627389728,
+      "delta_final": 0.17844439433404016
+     },
+     "cmp": {
+      "reference": 0.1883560210752756,
+      "delta_initial": 0.1988301627389728,
+      "delta_final": 0.17844439433404016
+     },
+     "loss_history": [
+      1.4025123119354248,
+      1.7429698705673218,
+      2.265073299407959
+     ],
+     "proxy_history": [
+      804.4502563476562,
+      804.0198364257812,
+      803.4149780273438
+     ],
+     "rms_history": [
+      0.020060991868376732,
+      0.020063208416104317,
+      0.02006574533879757
+     ],
+     "n_grad_steps": 3,
+     "latent_path": {},
+     "branch_t": 0.6818181818181819,
+     "resume_t": 0.5,
+     "i_branch": 7,
+     "k": 2,
+     "n_voxels": 2858,
+     "out_of_window": false,
+     "branch_noise_scale": 0.02,
+     "trust_region": 0.06,
+     "thickness_valid_ref": true,
+     "watertight_ref": false,
+     "breakdown": {
+      "reference": {
+       "detail_reward": 0.50472975856938,
+       "overhang_penalty": 0.16809325167781233,
+       "thickness_penalty": 0.13693686812200037,
+       "topology_penalty": 0.22687235388583385
+      },
+      "delta_initial": {
+       "detail_reward": 0.5481515801984429,
+       "overhang_penalty": 0.16751034969011408,
+       "thickness_penalty": 0.17064358355916717,
+       "topology_penalty": 0.2233496842037767
+      },
+      "delta_final": {
+       "detail_reward": 0.49073226867491576,
+       "overhang_penalty": 0.16802403697482846,
+       "thickness_penalty": 0.13329668286190388,
+       "topology_penalty": 0.21934309008286557
+      }
+     },
+     "proxy_reference": 805.5704345703125,
+     "resumed_from": "reference",
+     "delta_won_initial": true,
+     "delta_won_final": false,
+     "verdict_flipped": true,
+     "gain_perturbation": 0.0104741416636972,
+     "gain_steering": -0.02038576840493264,
+     "gain_total": -0.00991162674123544,
+     "loss_first": 1.4025123119354248,
+     "loss_last": 2.265073299407959,
+     "rms_first": 0.020060991868376732,
+     "rms_last": 0.02006574533879757,
+     "proxy_first": 804.4502563476562,
+     "proxy_last": 803.4149780273438,
+     "latent_steps_traced": 0
+    },
+    {
+     "branch_index": 1,
+     "scores": {
+      "reference": 0.27321641995363694,
+      "delta_initial": 0.25038737293086366,
+      "delta_final": 0.3089601488445088
+     },
+     "cmp": {
+      "reference": 0.27321641995363694,
+      "delta_initial": 0.25038737293086366,
+      "delta_final": 0.3089601488445088
+     },
+     "loss_history": [
+      0.6404448747634888,
+      0.6104793548583984,
+      0.5384820103645325
+     ],
+     "proxy_history": [
+      856.4826049804688,
+      856.4181518554688,
+      856.2532348632812
+     ],
+     "rms_history": [
+      0.019959157332777977,
+      0.019958755001425743,
+      0.019958525896072388
+     ],
+     "n_grad_steps": 3,
+     "latent_path": {},
+     "branch_t": 0.3750000000000001,
+     "resume_t": 0.0,
+     "i_branch": 10,
+     "k": 2,
+     "n_voxels": 2858,
+     "out_of_window": false,
+     "branch_noise_scale": 0.02,
+     "trust_region": 0.06,
+     "thickness_valid_ref": true,
+     "watertight_ref": false,
+     "breakdown": {
+      "reference": {
+       "detail_reward": 0.5158502201036426,
+       "overhang_penalty": 0.16531468666173726,
+       "thickness_penalty": 0.06769215676873322,
+       "topology_penalty": 0.19253913439070286
+      },
+      "delta_initial": {
+       "detail_reward": 0.5272798983463648,
+       "overhang_penalty": 0.16575977694665414,
+       "thickness_penalty": 0.10149752755512448,
+       "topology_penalty": 0.19270441827445084
+      },
+      "delta_final": {
+       "detail_reward": 0.5555429866715116,
+       "overhang_penalty": 0.16612067423353072,
+       "thickness_penalty": 0.07092290469696537,
+       "topology_penalty": 0.19078517793013383
+      }
+     },
+     "proxy_reference": 856.5909423828125,
+     "resumed_from": "delta",
+     "delta_won_initial": false,
+     "delta_won_final": true,
+     "verdict_flipped": true,
+     "gain_perturbation": -0.022829047022773274,
+     "gain_steering": 0.058572775913645125,
+     "gain_total": 0.03574372889087185,
+     "loss_first": 0.6404448747634888,
+     "loss_last": 0.5384820103645325,
+     "rms_first": 0.019959157332777977,
+     "rms_last": 0.019958525896072388,
+     "proxy_first": 856.4826049804688,
+     "proxy_last": 856.2532348632812,
+     "latent_steps_traced": 0
+    }
+   ]
+  },
+  {
+   "run_id": "20260803-155612-45053d",
+   "status": "ok",
+   "is_synthetic": false,
+   "error": null,
+   "started_at": 1785765372.7558131,
+   "duration_seconds": 653.0,
+   "image": "image.jpeg",
+   "pipeline_type": "512",
+   "steps_requested": null,
+   "steps_actual": 12,
+   "seed": 42,
+   "target_faces": 1000000,
+   "num_branches_requested": 2,
+   "num_branches_actual": 2,
+   "model_id": "microsoft/TRELLIS.2-4B",
+   "pid": 77967,
+   "n_events": 37,
+   "has_latent_telemetry": false,
+   "watertight": false,
+   "vertex_count": 498952,
+   "face_count": 1000000,
+   "generation_seconds": 518.4078838825226,
+   "postprocess_seconds": 42.80385208129883,
+   "overhang_pct": 5.4786940679195695,
+   "chamfer": 0.004679825295105402,
+   "hausdorff": 0.05285045845101619,
+   "volume_change_pct": null,
+   "vanilla_seconds": null,
+   "vanilla_face_count": null,
+   "branches": [
+    {
+     "branch_index": 0,
+     "scores": {
+      "reference": -0.2256110760649167,
+      "delta_initial": -0.21476235856820847,
+      "delta_final": -0.23987145722806757
+     },
+     "cmp": {
+      "reference": -0.2256110760649167,
+      "delta_initial": -0.21476235856820847,
+      "delta_final": -0.23987145722806757
+     },
+     "loss_history": [
+      1.0216213464736938,
+      0.5491321682929993,
+      5.280832192511298e-05
+     ],
+     "proxy_history": [
+      857.3500366210938,
+      858.2376708984375,
+      867.7738647460938
+     ],
+     "rms_history": [
+      0.020186029374599457,
+      0.0201741773635149,
+      0.0201741810888052
+     ],
+     "n_grad_steps": 3,
+     "latent_path": {},
+     "branch_t": 0.6818181818181819,
+     "resume_t": 0.5,
+     "i_branch": 7,
+     "k": 2,
+     "n_voxels": 1246,
+     "out_of_window": false,
+     "branch_noise_scale": 0.02,
+     "trust_region": 0.06,
+     "thickness_valid_ref": true,
+     "watertight_ref": false,
+     "breakdown": {
+      "reference": {
+       "detail_reward": 0.27759972491313073,
+       "overhang_penalty": 0.026571084805833346,
+       "thickness_penalty": 0.4593438258266783,
+       "topology_penalty": 0.3459178069107147
+      },
+      "delta_initial": {
+       "detail_reward": 0.27566292775319473,
+       "overhang_penalty": 0.027616795063178004,
+       "thickness_penalty": 0.44556306184276173,
+       "topology_penalty": 0.3449085883092693
+      },
+      "delta_final": {
+       "detail_reward": 0.27558916660880134,
+       "overhang_penalty": 0.027377580833382154,
+       "thickness_penalty": 0.47048136331087526,
+       "topology_penalty": 0.3520335938522299
+      }
+     },
+     "proxy_reference": 857.9253540039062,
+     "resumed_from": "reference",
+     "delta_won_initial": true,
+     "delta_won_final": false,
+     "verdict_flipped": true,
+     "gain_perturbation": 0.010848717496708238,
+     "gain_steering": -0.025109098659859108,
+     "gain_total": -0.01426038116315087,
+     "loss_first": 1.0216213464736938,
+     "loss_last": 5.280832192511298e-05,
+     "rms_first": 0.020186029374599457,
+     "rms_last": 0.0201741810888052,
+     "proxy_first": 857.3500366210938,
+     "proxy_last": 867.7738647460938,
+     "latent_steps_traced": 0
+    },
+    {
+     "branch_index": 1,
+     "scores": {
+      "reference": -0.14314536998502742,
+      "delta_initial": -0.1406915947281929,
+      "delta_final": -0.1647484613595267
+     },
+     "cmp": {
+      "reference": -0.14314536998502742,
+      "delta_initial": -0.1406915947281929,
+      "delta_final": -0.1647484613595267
+     },
+     "loss_history": [
+      0.724822461605072,
+      0.5323585271835327,
+      0.4171452522277832
+     ],
+     "proxy_history": [
+      876.9954833984375,
+      877.4103393554688,
+      877.7163696289062
+     ],
+     "rms_history": [
+      0.020029693841934204,
+      0.020032253116369247,
+      0.020034929737448692
+     ],
+     "n_grad_steps": 3,
+     "latent_path": {},
+     "branch_t": 0.3750000000000001,
+     "resume_t": 0.0,
+     "i_branch": 10,
+     "k": 2,
+     "n_voxels": 1246,
+     "out_of_window": false,
+     "branch_noise_scale": 0.02,
+     "trust_region": 0.06,
+     "thickness_valid_ref": true,
+     "watertight_ref": false,
+     "breakdown": {
+      "reference": {
+       "detail_reward": 0.27599887424667013,
+       "overhang_penalty": 0.02332139011187292,
+       "thickness_penalty": 0.38028180727257777,
+       "topology_penalty": 0.31082093694493784
+      },
+      "delta_initial": {
+       "detail_reward": 0.2641046331445782,
+       "overhang_penalty": 0.023091495296732906,
+       "thickness_penalty": 0.366246727833304,
+       "topology_penalty": 0.3091600948546848
+      },
+      "delta_final": {
+       "detail_reward": 0.27036112439862625,
+       "overhang_penalty": 0.023115172580192873,
+       "thickness_penalty": 0.3964759628919944,
+       "topology_penalty": 0.3103690057193137
+      }
+     },
+     "proxy_reference": 877.057861328125,
+     "resumed_from": "reference",
+     "delta_won_initial": true,
+     "delta_won_final": false,
+     "verdict_flipped": true,
+     "gain_perturbation": 0.0024537752568345172,
+     "gain_steering": -0.0240568666313338,
+     "gain_total": -0.021603091374499284,
+     "loss_first": 0.724822461605072,
+     "loss_last": 0.4171452522277832,
+     "rms_first": 0.020029693841934204,
+     "rms_last": 0.020034929737448692,
+     "proxy_first": 876.9954833984375,
+     "proxy_last": 877.7163696289062,
+     "latent_steps_traced": 0
+    }
+   ]
+  },
+  {
+   "run_id": "20260803-162537-c85ae3",
+   "status": "incomplete",
+   "is_synthetic": false,
+   "error": null,
+   "started_at": 1785767137.777262,
+   "duration_seconds": 0.5,
+   "image": "image.jpeg",
+   "pipeline_type": "512",
+   "steps_requested": null,
+   "steps_actual": null,
+   "seed": 42,
+   "target_faces": 1000000,
+   "num_branches_requested": 1,
+   "num_branches_actual": 0,
+   "model_id": "microsoft/TRELLIS.2-4B",
+   "pid": 79053,
+   "n_events": 2,
+   "has_latent_telemetry": false,
+   "watertight": null,
+   "vertex_count": null,
+   "face_count": null,
+   "generation_seconds": null,
+   "postprocess_seconds": null,
+   "overhang_pct": null,
+   "chamfer": null,
+   "hausdorff": null,
+   "volume_change_pct": null,
+   "vanilla_seconds": null,
+   "vanilla_face_count": null,
+   "branches": []
+  },
+  {
+   "run_id": "20260803-162548-1767c2",
+   "status": "ok",
+   "is_synthetic": false,
+   "error": null,
+   "started_at": 1785767148.400809,
+   "duration_seconds": 677.6,
+   "image": "image.jpeg",
+   "pipeline_type": "512",
+   "steps_requested": null,
+   "steps_actual": 12,
+   "seed": 42,
+   "target_faces": 1000000,
+   "num_branches_requested": 2,
+   "num_branches_actual": 2,
+   "model_id": "microsoft/TRELLIS.2-4B",
+   "pid": 79062,
+   "n_events": 37,
+   "has_latent_telemetry": false,
+   "watertight": false,
+   "vertex_count": 498952,
+   "face_count": 1000000,
+   "generation_seconds": 544.3443050384521,
+   "postprocess_seconds": 44.22514486312866,
+   "overhang_pct": 5.4786940679195695,
+   "chamfer": 0.004624804611213558,
+   "hausdorff": 0.053723923167031944,
+   "volume_change_pct": null,
+   "vanilla_seconds": null,
+   "vanilla_face_count": null,
+   "branches": [
+    {
+     "branch_index": 0,
+     "scores": {
+      "reference": -0.2256110760649167,
+      "delta_initial": -0.24301446175835917,
+      "delta_final": -0.263326182210809
+     },
+     "cmp": {
+      "reference": -0.2256110760649167,
+      "delta_initial": -0.24301446175835917,
+      "delta_final": -0.263326182210809
+     },
+     "loss_history": [
+      1.0138261318206787,
+      1.1920928244535389e-07,
+      1.1920928244535389e-07
+     ],
+     "proxy_history": [
+      858.4884643554688,
+      841.7726440429688,
+      841.7726440429688
+     ],
+     "rms_history": [
+      0.09092139452695847,
+      0.09092139452695847,
+      0.09092139452695847
+     ],
+     "n_grad_steps": 3,
+     "latent_path": {},
+     "branch_t": 0.6818181818181819,
+     "resume_t": 0.5,
+     "i_branch": 7,
+     "k": 2,
+     "n_voxels": 1246,
+     "out_of_window": false,
+     "branch_noise_scale": 0.09,
+     "trust_region": 0.27,
+     "thickness_valid_ref": true,
+     "watertight_ref": false,
+     "breakdown": {
+      "reference": {
+       "detail_reward": 0.27759972491313073,
+       "overhang_penalty": 0.026571084805833346,
+       "thickness_penalty": 0.4593438258266783,
+       "topology_penalty": 0.3459178069107147
+      },
+      "delta_initial": {
+       "detail_reward": 0.28108418197098484,
+       "overhang_penalty": 0.027150612866686036,
+       "thickness_penalty": 0.47922044780800566,
+       "topology_penalty": 0.3545516610930467
+      },
+      "delta_final": {
+       "detail_reward": 0.2718420083604786,
+       "overhang_penalty": 0.026785485735277198,
+       "thickness_penalty": 0.49139173040068973,
+       "topology_penalty": 0.33981948870641326
+      }
+     },
+     "proxy_reference": 857.9253540039062,
+     "resumed_from": "reference",
+     "delta_won_initial": false,
+     "delta_won_final": false,
+     "verdict_flipped": false,
+     "gain_perturbation": -0.017403385693442464,
+     "gain_steering": -0.020311720452449833,
+     "gain_total": -0.037715106145892296,
+     "loss_first": 1.0138261318206787,
+     "loss_last": 1.1920928244535389e-07,
+     "rms_first": 0.09092139452695847,
+     "rms_last": 0.09092139452695847,
+     "proxy_first": 858.4884643554688,
+     "proxy_last": 841.7726440429688,
+     "latent_steps_traced": 0
+    },
+    {
+     "branch_index": 1,
+     "scores": {
+      "reference": -0.14314536998502742,
+      "delta_initial": -0.1733432595894492,
+      "delta_final": -0.1497760088424848
+     },
+     "cmp": {
+      "reference": -0.14314536998502742,
+      "delta_initial": -0.1733432595894492,
+      "delta_final": -0.1497760088424848
+     },
+     "loss_history": [
+      3.973754644393921,
+      1.090996503829956,
+      0.23152080178260803
+     ],
+     "proxy_history": [
+      881.0126342773438,
+      877.7395629882812,
+      875.7127685546875
+     ],
+     "rms_history": [
+      0.09008140116930008,
+      0.09006379544734955,
+      0.09006015956401825
+     ],
+     "n_grad_steps": 3,
+     "latent_path": {},
+     "branch_t": 0.3750000000000001,
+     "resume_t": 0.0,
+     "i_branch": 10,
+     "k": 2,
+     "n_voxels": 1246,
+     "out_of_window": false,
+     "branch_noise_scale": 0.09,
+     "trust_region": 0.27,
+     "thickness_valid_ref": true,
+     "watertight_ref": false,
+     "breakdown": {
+      "reference": {
+       "detail_reward": 0.27599887424667013,
+       "overhang_penalty": 0.02332139011187292,
+       "thickness_penalty": 0.38028180727257777,
+       "topology_penalty": 0.31082093694493784
+      },
+      "delta_initial": {
+       "detail_reward": 0.2702352881745751,
+       "overhang_penalty": 0.023087641013178402,
+       "thickness_penalty": 0.4052448058522089,
+       "topology_penalty": 0.30492201797274043
+      },
+      "delta_final": {
+       "detail_reward": 0.27418926300988067,
+       "overhang_penalty": 0.02340406635954739,
+       "thickness_penalty": 0.3851978889237137,
+       "topology_penalty": 0.30726633138208703
+      }
+     },
+     "proxy_reference": 877.057861328125,
+     "resumed_from": "reference",
+     "delta_won_initial": false,
+     "delta_won_final": false,
+     "verdict_flipped": false,
+     "gain_perturbation": -0.030197889604421796,
+     "gain_steering": 0.02356725074696442,
+     "gain_total": -0.006630638857457377,
+     "loss_first": 3.973754644393921,
+     "loss_last": 0.23152080178260803,
+     "rms_first": 0.09008140116930008,
+     "rms_last": 0.09006015956401825,
+     "proxy_first": 881.0126342773438,
+     "proxy_last": 875.7127685546875,
+     "latent_steps_traced": 0
+    }
+   ]
+  },
+  {
+   "run_id": "20260803-163826-6b8c15",
+   "status": "ok",
+   "is_synthetic": false,
+   "error": null,
+   "started_at": 1785767906.950046,
+   "duration_seconds": 3836.8,
+   "image": "image.jpeg",
+   "pipeline_type": "512",
+   "steps_requested": null,
+   "steps_actual": 12,
+   "seed": 42,
+   "target_faces": 1000000,
+   "num_branches_requested": 2,
+   "num_branches_actual": 2,
+   "model_id": "microsoft/TRELLIS.2-4B",
+   "pid": 79805,
+   "n_events": 91,
+   "has_latent_telemetry": false,
+   "watertight": false,
+   "vertex_count": 561444,
+   "face_count": 1119978,
+   "generation_seconds": 3640.1695427894592,
+   "postprocess_seconds": 106.36205887794495,
+   "overhang_pct": 15.287410964202312,
+   "chamfer": 0.011510720867615615,
+   "hausdorff": 0.18407357210944533,
+   "volume_change_pct": null,
+   "vanilla_seconds": null,
+   "vanilla_face_count": null,
+   "branches": [
+    {
+     "branch_index": 0,
+     "scores": {
+      "reference": 0.27892738456438254,
+      "delta_initial": 0.2614265871622029,
+      "delta_final": 0.22530916749912608
+     },
+     "cmp": {
+      "reference": 0.27892738456438254,
+      "delta_initial": 0.2614265871622029,
+      "delta_final": 0.22530916749912608
+     },
+     "loss_history": [
+      2.638256549835205,
+      0.25110113620758057,
+      0.14449554681777954,
+      0.08434097468852997,
+      0.07971807569265366,
+      0.08507470041513443,
+      0.04074207320809364,
+      0.04132365435361862,
+      0.037375129759311676,
+      0.02994965761899948,
+      0.04234640672802925,
+      0.06274984031915665,
+      0.033276163041591644,
+      0.023607254028320312,
+      0.019714951515197754,
+      0.029394760727882385,
+      0.0200453232973814,
+      0.01817302219569683,
+      0.02272946760058403,
+      0.011958926916122437,
+      0.010631943121552467,
+      0.016489068046212196,
+      0.02494342066347599,
+      0.014578841626644135,
+      0.01628466136753559,
+      0.024067271500825882,
+      0.027835119515657425,
+      0.018304241821169853,
+      0.011150781065225601,
+      0.013498698361217976
+     ],
+     "proxy_history": [
+      797.9395141601562,
+      794.1217041015625,
+      793.5140380859375,
+      792.9450073242188,
+      792.8862915039062,
+      792.9540405273438,
+      792.1953735351562,
+      792.2098388671875,
+      792.107421875,
+      791.8822021484375,
+      792.2348022460938,
+      792.6383666992188,
+      791.9891967773438,
+      791.6410522460938,
+      791.4589233398438,
+      791.8632202148438,
+      791.4757080078125,
+      791.376708984375,
+      791.6027221679688,
+      790.9551391601562,
+      790.8368530273438,
+      791.2786254882812,
+      791.69677734375,
+      791.154541015625,
+      791.2660522460938,
+      791.6605834960938,
+      791.8079223632812,
+      791.3839721679688,
+      790.884765625,
+      791.0770263671875
+     ],
+     "rms_history": [
+      0.10034351050853729,
+      0.10034333169460297,
+      0.10034322738647461,
+      0.10034328699111938,
+      0.10034338384866714,
+      0.10034353286027908,
+      0.10034360736608505,
+      0.100343719124794,
+      0.10034388303756714,
+      0.1003439649939537,
+      0.10034411400556564,
+      0.10034430772066116,
+      0.10034441202878952,
+      0.10034451633691788,
+      0.10034460574388504,
+      0.10034477710723877,
+      0.10034484416246414,
+      0.1003449335694313,
+      0.10034505277872086,
+      0.10034510493278503,
+      0.10034516453742981,
+      0.10034523904323578,
+      0.10034539550542831,
+      0.10034547001123428,
+      0.10034555941820145,
+      0.10034571588039398,
+      0.1003459021449089,
+      0.10034600645303726,
+      0.10034607350826263,
+      0.1003461629152298
+     ],
+     "n_grad_steps": 30,
+     "latent_path": {},
+     "branch_t": 0.6818181818181819,
+     "resume_t": 0.5,
+     "i_branch": 7,
+     "k": 2,
+     "n_voxels": 2818,
+     "out_of_window": false,
+     "branch_noise_scale": 0.1,
+     "trust_region": 0.30000000000000004,
+     "thickness_valid_ref": true,
+     "watertight_ref": false,
+     "breakdown": {
+      "reference": {
+       "detail_reward": 0.5323220875960792,
+       "overhang_penalty": 0.1479987561060045,
+       "thickness_penalty": 0.09536379766881434,
+       "topology_penalty": 0.20064298513755666
+      },
+      "delta_initial": {
+       "detail_reward": 0.5085234523869631,
+       "overhang_penalty": 0.1467239161529248,
+       "thickness_penalty": 0.09050749058303796,
+       "topology_penalty": 0.19730916977594795
+      },
+      "delta_final": {
+       "detail_reward": 0.4737438985116684,
+       "overhang_penalty": 0.14769565230667117,
+       "thickness_penalty": 0.09085561999143342,
+       "topology_penalty": 0.1976691742887554
+      }
+     },
+     "proxy_reference": 795.3754272460938,
+     "resumed_from": "reference",
+     "delta_won_initial": false,
+     "delta_won_final": false,
+     "verdict_flipped": false,
+     "gain_perturbation": -0.017500797402179635,
+     "gain_steering": -0.03611741966307683,
+     "gain_total": -0.05361821706525646,
+     "loss_first": 2.638256549835205,
+     "loss_last": 0.013498698361217976,
+     "rms_first": 0.10034351050853729,
+     "rms_last": 0.1003461629152298,
+     "proxy_first": 797.9395141601562,
+     "proxy_last": 791.0770263671875,
+     "latent_steps_traced": 0
+    },
+    {
+     "branch_index": 1,
+     "scores": {
+      "reference": 0.37845342125819714,
+      "delta_initial": 0.3445196653674495,
+      "delta_final": 0.2882044808521834
+     },
+     "cmp": {
+      "reference": 0.37845342125819714,
+      "delta_initial": 0.3445196653674495,
+      "delta_final": 0.2882044808521834
+     },
+     "loss_history": [
+      4.05754280090332,
+      2.792933225631714,
+      1.6994177103042603,
+      0.9071947336196899,
+      0.5115863084793091,
+      0.328983873128891,
+      0.2433873564004898,
+      0.18466496467590332,
+      0.15623170137405396,
+      0.13290558755397797,
+      0.1120498776435852,
+      0.1002415120601654,
+      0.08594004064798355,
+      0.08125200122594833,
+      0.07409108430147171,
+      0.06483177840709686,
+      0.06242768466472626,
+      0.05724447965621948,
+      0.05295693129301071,
+      0.04886311665177345,
+      0.04834474250674248,
+      0.04376870021224022,
+      0.04266892746090889,
+      0.039869241416454315,
+      0.03820114582777023,
+      0.03614597022533417,
+      0.03481629490852356,
+      0.03246499225497246,
+      0.03363562747836113,
+      0.030381329357624054
+     ],
+     "proxy_history": [
+      864.3359375,
+      863.0255737304688,
+      861.7933959960938,
+      860.6860961914062,
+      859.8922729492188,
+      859.3530883789062,
+      859.0068969726562,
+      858.7003784179688,
+      858.5185546875,
+      858.3449096679688,
+      858.16357421875,
+      858.0462036132812,
+      857.885009765625,
+      857.8265380859375,
+      857.7306518554688,
+      857.5924682617188,
+      857.553466796875,
+      857.4641723632812,
+      857.3841552734375,
+      857.3016357421875,
+      857.2907104492188,
+      857.18896484375,
+      857.1629638671875,
+      857.0936889648438,
+      857.0501098632812,
+      856.9937744140625,
+      856.9556274414062,
+      856.884521484375,
+      856.9205322265625,
+      856.817138671875
+     ],
+     "rms_history": [
+      0.09968502074480057,
+      0.09966302663087845,
+      0.09964674711227417,
+      0.09963662177324295,
+      0.09963041543960571,
+      0.09962642192840576,
+      0.09962351620197296,
+      0.09962137043476105,
+      0.09961961209774017,
+      0.09961816668510437,
+      0.09961697459220886,
+      0.09961593151092529,
+      0.09961505234241486,
+      0.09961424767971039,
+      0.09961352497339249,
+      0.09961289912462234,
+      0.09961233288049698,
+      0.0996118038892746,
+      0.0996113196015358,
+      0.09961088746786118,
+      0.09961047023534775,
+      0.0996100902557373,
+      0.09960973262786865,
+      0.09960940480232239,
+      0.09960909187793732,
+      0.09960880875587463,
+      0.09960853308439255,
+      0.09960827976465225,
+      0.09960801154375076,
+      0.09960778802633286
+     ],
+     "n_grad_steps": 30,
+     "latent_path": {},
+     "branch_t": 0.3750000000000001,
+     "resume_t": 0.0,
+     "i_branch": 10,
+     "k": 2,
+     "n_voxels": 2818,
+     "out_of_window": false,
+     "branch_noise_scale": 0.1,
+     "trust_region": 0.30000000000000004,
+     "thickness_valid_ref": true,
+     "watertight_ref": false,
+     "breakdown": {
+      "reference": {
+       "detail_reward": 0.6075628763330518,
+       "overhang_penalty": 0.14579861343169948,
+       "thickness_penalty": 0.07401784499857123,
+       "topology_penalty": 0.1858599328916803
+      },
+      "delta_initial": {
+       "detail_reward": 0.5597388123994329,
+       "overhang_penalty": 0.14347497235209924,
+       "thickness_penalty": 0.06257331219377937,
+       "topology_penalty": 0.18341724972209508
+      },
+      "delta_final": {
+       "detail_reward": 0.5272826662149838,
+       "overhang_penalty": 0.14620636297050377,
+       "thickness_penalty": 0.08358693319917603,
+       "topology_penalty": 0.18569778386241123
+      }
+     },
+     "proxy_reference": 860.2958374023438,
+     "resumed_from": "reference",
+     "delta_won_initial": false,
+     "delta_won_final": false,
+     "verdict_flipped": false,
+     "gain_perturbation": -0.03393375589074765,
+     "gain_steering": -0.05631518451526607,
+     "gain_total": -0.09024894040601372,
+     "loss_first": 4.05754280090332,
+     "loss_last": 0.030381329357624054,
+     "rms_first": 0.09968502074480057,
+     "rms_last": 0.09960778802633286,
+     "proxy_first": 864.3359375,
+     "proxy_last": 856.817138671875,
+     "latent_steps_traced": 0
+    }
+   ]
+  },
+  {
+   "run_id": "20260804-114403-latent1",
+   "status": "ok",
+   "is_synthetic": false,
+   "error": null,
+   "started_at": 1785836643.580273,
+   "duration_seconds": 1214.6,
+   "image": "image.jpeg",
+   "pipeline_type": "512",
+   "steps_requested": null,
+   "steps_actual": 12,
+   "seed": 42,
+   "target_faces": 1000000,
+   "num_branches_requested": 2,
+   "num_branches_actual": 2,
+   "model_id": "microsoft/TRELLIS.2-4B",
+   "pid": 17556,
+   "n_events": 53,
+   "has_latent_telemetry": true,
+   "watertight": false,
+   "vertex_count": 561444,
+   "face_count": 1119978,
+   "generation_seconds": 1016.4656019210815,
+   "postprocess_seconds": 106.30615329742432,
+   "overhang_pct": 15.287410964202312,
+   "chamfer": 0.011320611401485759,
+   "hausdorff": 0.18468470122449676,
+   "volume_change_pct": null,
+   "vanilla_seconds": null,
+   "vanilla_face_count": null,
+   "branches": [
+    {
+     "branch_index": 0,
+     "scores": {
+      "reference": 0.27892738456438254,
+      "delta_initial": 0.2614265871622029,
+      "delta_final": 0.2578067371965054
+     },
+     "cmp": {
+      "reference": 0.27892738456438254,
+      "delta_initial": 0.2614265871622029,
+      "delta_final": 0.2578067371965054
+     },
+     "loss_history": [
+      2.638256549835205,
+      0.2647809684276581,
+      0.21373172104358673
+     ],
+     "proxy_history": [
+      797.9395141601562,
+      794.181884765625,
+      793.941162109375
+     ],
+     "rms_history": [
+      0.10034340620040894,
+      0.10034307837486267,
+      0.10034308582544327
+     ],
+     "n_grad_steps": 3,
+     "latent_path": {
+      "fork": [
+       {
+        "index": -1,
+        "t": 0.6818181818181819,
+        "rms": 0.7469990849494934,
+        "absmax": 3.37170147895813,
+        "proj": [
+         0.5479298233985901,
+         -0.6239920258522034
+        ]
+       }
+      ],
+      "reference": [
+       {
+        "index": 0,
+        "t": 0.6818181818181819,
+        "rms": 0.7081180214881897,
+        "absmax": 3.159435987472534,
+        "proj": [
+         0.5591663718223572,
+         -0.5167446732521057
+        ],
+        "v_rms": 1.2688195705413818,
+        "v_absmax": 6.317503452301025
+       },
+       {
+        "index": 1,
+        "t": 0.6,
+        "rms": 0.6825233101844788,
+        "absmax": 2.9225704669952393,
+        "proj": [
+         0.5969725847244263,
+         -0.39920663833618164
+        ],
+        "v_rms": 1.259232997894287,
+        "v_absmax": 6.121543884277344
+       }
+      ],
+      "delta_initial": [
+       {
+        "index": 0,
+        "t": 0.6818181818181819,
+        "rms": 0.7139594554901123,
+        "absmax": 3.1752052307128906,
+        "proj": [
+         0.5007279515266418,
+         -0.46553733944892883
+        ],
+        "v_rms": 1.274467945098877,
+        "v_absmax": 6.247725009918213
+       },
+       {
+        "index": 1,
+        "t": 0.6,
+        "rms": 0.6873776912689209,
+        "absmax": 2.999528169631958,
+        "proj": [
+         0.49868762493133545,
+         -0.34210216999053955
+        ],
+        "v_rms": 1.2625226974487305,
+        "v_absmax": 6.052652359008789
+       }
+      ],
+      "delta_final": [
+       {
+        "index": 0,
+        "t": 0.6818181818181819,
+        "rms": 0.7137419581413269,
+        "absmax": 3.16989803314209,
+        "proj": [
+         0.49625447392463684,
+         -0.46658313274383545
+        ],
+        "v_rms": 1.2744249105453491,
+        "v_absmax": 6.1478447914123535
+       },
+       {
+        "index": 1,
+        "t": 0.6,
+        "rms": 0.6871004104614258,
+        "absmax": 2.9961564540863037,
+        "proj": [
+         0.5099862217903137,
+         -0.3523041605949402
+        ],
+        "v_rms": 1.2619110345840454,
+        "v_absmax": 5.846907615661621
+       }
+      ]
+     },
+     "branch_t": 0.6818181818181819,
+     "resume_t": 0.5,
+     "i_branch": 7,
+     "k": 2,
+     "n_voxels": 2818,
+     "out_of_window": false,
+     "branch_noise_scale": 0.1,
+     "trust_region": 0.30000000000000004,
+     "eps_rms": 0.10034433752298355,
+     "base_rms": 0.7469991445541382,
+     "perturbation_relative": 0.1343299299478531,
+     "thickness_valid_ref": true,
+     "watertight_ref": false,
+     "breakdown": {
+      "reference": {
+       "detail_reward": 0.5323220875960792,
+       "overhang_penalty": 0.1479987561060045,
+       "thickness_penalty": 0.09536379766881434,
+       "topology_penalty": 0.20064298513755666
+      },
+      "delta_initial": {
+       "detail_reward": 0.5085234523869631,
+       "overhang_penalty": 0.1467239161529248,
+       "thickness_penalty": 0.09050749058303796,
+       "topology_penalty": 0.19730916977594795
+      },
+      "delta_final": {
+       "detail_reward": 0.49269665170378507,
+       "overhang_penalty": 0.1503115299686119,
+       "thickness_penalty": 0.07467452077745193,
+       "topology_penalty": 0.1980772752243179
+      }
+     },
+     "proxy_reference": 795.3754272460938,
+     "resumed_from": "reference",
+     "delta_won_initial": false,
+     "delta_won_final": false,
+     "verdict_flipped": false,
+     "gain_perturbation": -0.017500797402179635,
+     "gain_steering": -0.0036198499656975303,
+     "gain_total": -0.021120647367877166,
+     "loss_first": 2.638256549835205,
+     "loss_last": 0.21373172104358673,
+     "rms_first": 0.10034340620040894,
+     "rms_last": 0.10034308582544327,
+     "proxy_first": 797.9395141601562,
+     "proxy_last": 793.941162109375,
+     "latent_steps_traced": 7
+    },
+    {
+     "branch_index": 1,
+     "scores": {
+      "reference": 0.37845342125819714,
+      "delta_initial": 0.3445196653674495,
+      "delta_final": 0.3713853443293149
+     },
+     "cmp": {
+      "reference": 0.37845342125819714,
+      "delta_initial": 0.3445196653674495,
+      "delta_final": 0.3713853443293149
+     },
+     "loss_history": [
+      4.057482719421387,
+      2.824363946914673,
+      1.6816964149475098
+     ],
+     "proxy_history": [
+      864.3358764648438,
+      863.0590209960938,
+      861.7716674804688
+     ],
+     "rms_history": [
+      0.09968503564596176,
+      0.09966308623552322,
+      0.09964697062969208
+     ],
+     "n_grad_steps": 3,
+     "latent_path": {
+      "fork": [
+       {
+        "index": -1,
+        "t": 0.3750000000000001,
+        "rms": 0.687293529510498,
+        "absmax": 3.148859739303589,
+        "proj": [
+         0.5421333909034729,
+         -0.13880068063735962
+        ]
+       }
+      ],
+      "reference": [
+       {
+        "index": 0,
+        "t": 0.3750000000000001,
+        "rms": 0.7497616410255432,
+        "absmax": 3.6953673362731934,
+        "proj": [
+         0.46541595458984375,
+         0.21180589497089386
+        ],
+        "v_rms": 1.1709786653518677,
+        "v_absmax": 5.486236095428467
+       },
+       {
+        "index": 1,
+        "t": 0.21428571428571436,
+        "rms": 0.9032368659973145,
+        "absmax": 4.587584495544434,
+        "proj": [
+         0.3344314694404602,
+         0.6675307154655457
+        ],
+        "v_rms": 1.0918387174606323,
+        "v_absmax": 4.72531270980835
+       }
+      ],
+      "delta_initial": [
+       {
+        "index": 0,
+        "t": 0.3750000000000001,
+        "rms": 0.7537000775337219,
+        "absmax": 3.649423360824585,
+        "proj": [
+         0.46447622776031494,
+         0.10080057382583618
+        ],
+        "v_rms": 1.1767605543136597,
+        "v_absmax": 5.409120559692383
+       },
+       {
+        "index": 1,
+        "t": 0.21428571428571436,
+        "rms": 0.9056539535522461,
+        "absmax": 4.53181266784668,
+        "proj": [
+         0.3318350315093994,
+         0.576076090335846
+        ],
+        "v_rms": 1.0939373970031738,
+        "v_absmax": 4.853370666503906
+       }
+      ],
+      "delta_final": [
+       {
+        "index": 0,
+        "t": 0.3750000000000001,
+        "rms": 0.7526208758354187,
+        "absmax": 3.6452105045318604,
+        "proj": [
+         0.4697679579257965,
+         0.10091124475002289
+        ],
+        "v_rms": 1.1771595478057861,
+        "v_absmax": 5.39204216003418
+       },
+       {
+        "index": 1,
+        "t": 0.21428571428571436,
+        "rms": 0.9045003056526184,
+        "absmax": 4.531308174133301,
+        "proj": [
+         0.3446851670742035,
+         0.5776476263999939
+        ],
+        "v_rms": 1.0938398838043213,
+        "v_absmax": 4.851358890533447
+       }
+      ]
+     },
+     "branch_t": 0.3750000000000001,
+     "resume_t": 0.0,
+     "i_branch": 10,
+     "k": 2,
+     "n_voxels": 2818,
+     "out_of_window": false,
+     "branch_noise_scale": 0.1,
+     "trust_region": 0.30000000000000004,
+     "eps_rms": 0.09971164166927338,
+     "base_rms": 0.687293529510498,
+     "perturbation_relative": 0.14507868885993958,
+     "thickness_valid_ref": true,
+     "watertight_ref": false,
+     "breakdown": {
+      "reference": {
+       "detail_reward": 0.6075628763330518,
+       "overhang_penalty": 0.14579861343169948,
+       "thickness_penalty": 0.07401784499857123,
+       "topology_penalty": 0.1858599328916803
+      },
+      "delta_initial": {
+       "detail_reward": 0.5597388123994329,
+       "overhang_penalty": 0.14347497235209924,
+       "thickness_penalty": 0.06257331219377937,
+       "topology_penalty": 0.18341724972209508
+      },
+      "delta_final": {
+       "detail_reward": 0.6068386178129073,
+       "overhang_penalty": 0.14561849504143393,
+       "thickness_penalty": 0.08075764049630542,
+       "topology_penalty": 0.1815427589170606
+      }
+     },
+     "proxy_reference": 860.2958374023438,
+     "resumed_from": "reference",
+     "delta_won_initial": false,
+     "delta_won_final": false,
+     "verdict_flipped": false,
+     "gain_perturbation": -0.03393375589074765,
+     "gain_steering": 0.026865678961865425,
+     "gain_total": -0.007068076928882228,
+     "loss_first": 4.057482719421387,
+     "loss_last": 1.6816964149475098,
+     "rms_first": 0.09968503564596176,
+     "rms_last": 0.09964697062969208,
+     "proxy_first": 864.3358764648438,
+     "proxy_last": 861.7716674804688,
+     "latent_steps_traced": 7
+    }
+   ]
+  },
+  {
+   "run_id": "20260804-121432-ef2d02",
+   "status": "ok",
+   "is_synthetic": false,
+   "error": null,
+   "started_at": 1785838472.837785,
+   "duration_seconds": 2441.2,
+   "image": "image.png",
+   "pipeline_type": "512",
+   "steps_requested": null,
+   "steps_actual": 12,
+   "seed": 42,
+   "target_faces": 600000,
+   "num_branches_requested": 2,
+   "num_branches_actual": 2,
+   "model_id": "microsoft/TRELLIS.2-4B",
+   "pid": 19600,
+   "n_events": 71,
+   "has_latent_telemetry": true,
+   "watertight": false,
+   "vertex_count": 368159,
+   "face_count": 734996,
+   "generation_seconds": 2254.6045310497284,
+   "postprocess_seconds": 95.02434206008911,
+   "overhang_pct": 12.335719354103729,
+   "chamfer": 0.006690636143726381,
+   "hausdorff": 0.10629612213632486,
+   "volume_change_pct": null,
+   "vanilla_seconds": null,
+   "vanilla_face_count": null,
+   "branches": [
+    {
+     "branch_index": 0,
+     "scores": {
+      "reference": 0.5745447295061648,
+      "delta_initial": 0.5789573907551808,
+      "delta_final": 0.5391016521838106
+     },
+     "cmp": {
+      "reference": 0.5745447295061648,
+      "delta_initial": 0.5789573907551808,
+      "delta_final": 0.5391016521838106
+     },
+     "loss_history": [
+      0.0010346779599785805,
+      0.0013449679827317595,
+      0.001888398313894868,
+      0.0014793653972446918,
+      0.0006691362359561026,
+      0.0012143626809120178,
+      0.0008575814426876605,
+      0.0009450022480450571,
+      0.0014690094394609332,
+      0.0015614948933944106,
+      0.0012355559738352895,
+      0.0010684978915378451
+     ],
+     "proxy_history": [
+      689.856201171875,
+      689.5938110351562,
+      689.254150390625,
+      689.4984741210938,
+      690.292236328125,
+      689.696044921875,
+      690.0440063476562,
+      689.9468994140625,
+      689.5055541992188,
+      689.4444580078125,
+      689.6787109375,
+      689.8240966796875
+     ],
+     "rms_history": [
+      0.20037060976028442,
+      0.2003706395626068,
+      0.2003706842660904,
+      0.20037071406841278,
+      0.20037071406841278,
+      0.20037074387073517,
+      0.20037075877189636,
+      0.20037078857421875,
+      0.20037080347537994,
+      0.20037084817886353,
+      0.2003708779811859,
+      0.2003708928823471
+     ],
+     "n_grad_steps": 12,
+     "latent_path": {
+      "fork": [
+       {
+        "index": -1,
+        "t": 0.6818181818181819,
+        "rms": 0.758040189743042,
+        "absmax": 3.5019521713256836,
+        "proj": [
+         0.1312871128320694,
+         -0.3694761395454407
+        ]
+       }
+      ],
+      "reference": [
+       {
+        "index": 0,
+        "t": 0.6818181818181819,
+        "rms": 0.7247440218925476,
+        "absmax": 3.394920587539673,
+        "proj": [
+         -0.020939156413078308,
+         -0.21226251125335693
+        ],
+        "v_rms": 1.4029918909072876,
+        "v_absmax": 6.920189380645752
+       },
+       {
+        "index": 1,
+        "t": 0.6,
+        "rms": 0.7074605822563171,
+        "absmax": 3.1972570419311523,
+        "proj": [
+         -0.2601343095302582,
+         -0.003325849771499634
+        ],
+        "v_rms": 1.4003527164459229,
+        "v_absmax": 6.751781463623047
+       }
+      ],
+      "delta_initial": [
+       {
+        "index": 0,
+        "t": 0.6818181818181819,
+        "rms": 0.7477772235870361,
+        "absmax": 3.494291067123413,
+        "proj": [
+         0.049727946519851685,
+         -0.3589674234390259
+        ],
+        "v_rms": 1.432917833328247,
+        "v_absmax": 6.969151973724365
+       },
+       {
+        "index": 1,
+        "t": 0.6,
+        "rms": 0.7255706787109375,
+        "absmax": 3.291207790374756,
+        "proj": [
+         -0.18745608627796173,
+         -0.1529499590396881
+        ],
+        "v_rms": 1.4266149997711182,
+        "v_absmax": 6.694855213165283
+       }
+      ],
+      "delta_final": [
+       {
+        "index": 0,
+        "t": 0.6818181818181819,
+        "rms": 0.7477653622627258,
+        "absmax": 3.4894161224365234,
+        "proj": [
+         0.05256618559360504,
+         -0.3560293912887573
+        ],
+        "v_rms": 1.4330224990844727,
+        "v_absmax": 6.653792858123779
+       },
+       {
+        "index": 1,
+        "t": 0.6,
+        "rms": 0.7256160974502563,
+        "absmax": 3.2905921936035156,
+        "proj": [
+         -0.18913039565086365,
+         -0.14458638429641724
+        ],
+        "v_rms": 1.4263802766799927,
+        "v_absmax": 6.856025218963623
+       }
+      ]
+     },
+     "branch_t": 0.6818181818181819,
+     "resume_t": 0.5,
+     "i_branch": 7,
+     "k": 2,
+     "n_voxels": 3328,
+     "out_of_window": false,
+     "branch_noise_scale": 0.2,
+     "trust_region": 0.6000000000000001,
+     "eps_rms": 0.20037059485912323,
+     "base_rms": 0.758040189743042,
+     "perturbation_relative": 0.26432713866233826,
+     "thickness_valid_ref": true,
+     "watertight_ref": false,
+     "breakdown": {
+      "reference": {
+       "detail_reward": 0.8885917603991782,
+       "overhang_penalty": 0.22738546299138046,
+       "thickness_penalty": 0.07963531756957952,
+       "topology_penalty": 0.14052500664106837
+      },
+      "delta_initial": {
+       "detail_reward": 0.8669989557435048,
+       "overhang_penalty": 0.22549366317860708,
+       "thickness_penalty": 0.05579961509898846,
+       "topology_penalty": 0.13496573421456967
+      },
+      "delta_final": {
+       "detail_reward": 0.8341730671402592,
+       "overhang_penalty": 0.22396636356886096,
+       "thickness_penalty": 0.06434959448784676,
+       "topology_penalty": 0.13510913799482058
+      }
+     },
+     "proxy_reference": 682.9830932617188,
+     "resumed_from": "reference",
+     "delta_won_initial": true,
+     "delta_won_final": false,
+     "verdict_flipped": true,
+     "gain_perturbation": 0.00441266124901607,
+     "gain_steering": -0.03985573857137026,
+     "gain_total": -0.03544307732235419,
+     "loss_first": 0.0010346779599785805,
+     "loss_last": 0.0010684978915378451,
+     "rms_first": 0.20037060976028442,
+     "rms_last": 0.2003708928823471,
+     "proxy_first": 689.856201171875,
+     "proxy_last": 689.8240966796875,
+     "latent_steps_traced": 7
+    },
+    {
+     "branch_index": 1,
+     "scores": {
+      "reference": 0.7113385441264621,
+      "delta_initial": 0.6292731029800489,
+      "delta_final": 0.6501487364243176
+     },
+     "cmp": {
+      "reference": 0.7113385441264621,
+      "delta_initial": 0.6292731029800489,
+      "delta_final": 0.6501487364243176
+     },
+     "loss_history": [
+      10.21030330657959,
+      8.714458465576172,
+      7.2874274253845215,
+      5.997361660003662,
+      4.677255630493164,
+      3.34580397605896,
+      2.2329165935516357,
+      1.3355729579925537,
+      0.773334264755249,
+      0.4893823266029358,
+      0.33667296171188354,
+      0.255677729845047
+     ],
+     "proxy_history": [
+      676.9481811523438,
+      675.4522094726562,
+      674.024658203125,
+      672.7327880859375,
+      671.4058227539062,
+      670.0478515625,
+      668.857421875,
+      667.768310546875,
+      666.892333984375,
+      666.2779541015625,
+      665.8223266601562,
+      665.504638671875
+     ],
+     "rms_history": [
+      0.19975507259368896,
+      0.19968809187412262,
+      0.19962748885154724,
+      0.19957289099693298,
+      0.19952449202537537,
+      0.19948190450668335,
+      0.19944576919078827,
+      0.19941860437393188,
+      0.19940029084682465,
+      0.1993878334760666,
+      0.1993790715932846,
+      0.19937241077423096
+     ],
+     "n_grad_steps": 12,
+     "latent_path": {
+      "fork": [
+       {
+        "index": -1,
+        "t": 0.3750000000000001,
+        "rms": 0.7242094278335571,
+        "absmax": 3.3964626789093018,
+        "proj": [
+         -0.5306410789489746,
+         0.27263620495796204
+        ]
+       }
+      ],
+      "reference": [
+       {
+        "index": 0,
+        "t": 0.3750000000000001,
+        "rms": 0.8031924366950989,
+        "absmax": 3.8767733573913574,
+        "proj": [
+         -0.8843084573745728,
+         0.628025233745575
+        ],
+        "v_rms": 1.3549491167068481,
+        "v_absmax": 6.158374309539795
+       },
+       {
+        "index": 1,
+        "t": 0.21428571428571436,
+        "rms": 0.9793070554733276,
+        "absmax": 4.61672306060791,
+        "proj": [
+         -1.3827019929885864,
+         1.0960644483566284
+        ],
+        "v_rms": 1.3098244667053223,
+        "v_absmax": 6.036923408508301
+       }
+      ],
+      "delta_initial": [
+       {
+        "index": 0,
+        "t": 0.3750000000000001,
+        "rms": 0.8172991275787354,
+        "absmax": 3.8382954597473145,
+        "proj": [
+         -0.9136806726455688,
+         0.5858575105667114
+        ],
+        "v_rms": 1.389950156211853,
+        "v_absmax": 6.234891891479492
+       },
+       {
+        "index": 1,
+        "t": 0.21428571428571436,
+        "rms": 0.9844315052032471,
+        "absmax": 4.530908584594727,
+        "proj": [
+         -1.432068109512329,
+         1.0145071744918823
+        ],
+        "v_rms": 1.3199348449707031,
+        "v_absmax": 6.101326942443848
+       }
+      ],
+      "delta_final": [
+       {
+        "index": 0,
+        "t": 0.3750000000000001,
+        "rms": 0.8126194477081299,
+        "absmax": 3.8139045238494873,
+        "proj": [
+         -0.9156498312950134,
+         0.5769288539886475
+        ],
+        "v_rms": 1.3956577777862549,
+        "v_absmax": 6.250184059143066
+       },
+       {
+        "index": 1,
+        "t": 0.21428571428571436,
+        "rms": 0.9795604348182678,
+        "absmax": 4.497641086578369,
+        "proj": [
+         -1.4468529224395752,
+         1.0246533155441284
+        ],
+        "v_rms": 1.328545093536377,
+        "v_absmax": 6.123644828796387
+       }
+      ]
+     },
+     "branch_t": 0.3750000000000001,
+     "resume_t": 0.0,
+     "i_branch": 10,
+     "k": 2,
+     "n_voxels": 3328,
+     "out_of_window": false,
+     "branch_noise_scale": 0.2,
+     "trust_region": 0.6000000000000001,
+     "eps_rms": 0.19982874393463135,
+     "base_rms": 0.7242094278335571,
+     "perturbation_relative": 0.27592673897743225,
+     "thickness_valid_ref": true,
+     "watertight_ref": false,
+     "breakdown": {
+      "reference": {
+       "detail_reward": 0.9892084222804493,
+       "overhang_penalty": 0.22576825034150094,
+       "thickness_penalty": 0.0449748739339302,
+       "topology_penalty": 0.14253507757111922
+      },
+      "delta_initial": {
+       "detail_reward": 0.9179891747867172,
+       "overhang_penalty": 0.22758267039663618,
+       "thickness_penalty": 0.05412660069168783,
+       "topology_penalty": 0.1401360143668855
+      },
+      "delta_final": {
+       "detail_reward": 0.936902241298396,
+       "overhang_penalty": 0.22361019463731813,
+       "thickness_penalty": 0.05620365377223799,
+       "topology_penalty": 0.13879312929044635
+      }
+     },
+     "proxy_reference": 666.7379150390625,
+     "resumed_from": "reference",
+     "delta_won_initial": false,
+     "delta_won_final": false,
+     "verdict_flipped": false,
+     "gain_perturbation": -0.08206544114641323,
+     "gain_steering": 0.020875633444268682,
+     "gain_total": -0.06118980770214455,
+     "loss_first": 10.21030330657959,
+     "loss_last": 0.255677729845047,
+     "rms_first": 0.19975507259368896,
+     "rms_last": 0.19937241077423096,
+     "proxy_first": 676.9481811523438,
+     "proxy_last": 665.504638671875,
+     "latent_steps_traced": 7
+    }
+   ]
+  },
+  {
+   "run_id": "20260804-130519-2044d0",
+   "status": "ok",
+   "is_synthetic": false,
+   "error": null,
+   "started_at": 1785841519.84429,
+   "duration_seconds": 1310.5,
+   "image": "image.png",
+   "pipeline_type": "512",
+   "steps_requested": null,
+   "steps_actual": 12,
+   "seed": 42,
+   "target_faces": 1000000,
+   "num_branches_requested": 2,
+   "num_branches_actual": 2,
+   "model_id": "microsoft/TRELLIS.2-4B",
+   "pid": 21787,
+   "n_events": 53,
+   "has_latent_telemetry": true,
+   "watertight": false,
+   "vertex_count": 500559,
+   "face_count": 1000000,
+   "generation_seconds": 1124.6539459228516,
+   "postprocess_seconds": 93.49617195129395,
+   "overhang_pct": 12.086823547487,
+   "chamfer": 0.005654609995565833,
+   "hausdorff": 0.10445853933721715,
+   "volume_change_pct": null,
+   "vanilla_seconds": null,
+   "vanilla_face_count": null,
+   "branches": [
+    {
+     "branch_index": 0,
+     "scores": {
+      "reference": 0.5745447295061648,
+      "delta_initial": 0.4721296849417856,
+      "delta_final": 0.43578985967610956
+     },
+     "cmp": {
+      "reference": 0.5745447295061648,
+      "delta_initial": 0.4721296849417856,
+      "delta_final": 0.43578985967610956
+     },
+     "loss_history": [
+      1029.565185546875,
+      656.9100952148438,
+      453.22662353515625
+     ],
+     "proxy_history": [
+      1712.5482177734375,
+      1339.8931884765625,
+      1136.209716796875
+     ],
+     "rms_history": [
+      0.9954075217247009,
+      0.9923164248466492,
+      0.9900131821632385
+     ],
+     "n_grad_steps": 3,
+     "latent_path": {
+      "fork": [
+       {
+        "index": -1,
+        "t": 0.6818181818181819,
+        "rms": 0.758040189743042,
+        "absmax": 3.5019521713256836,
+        "proj": [
+         0.1312871128320694,
+         -0.3694761395454407
+        ]
+       }
+      ],
+      "reference": [
+       {
+        "index": 0,
+        "t": 0.6818181818181819,
+        "rms": 0.7247440218925476,
+        "absmax": 3.394920587539673,
+        "proj": [
+         -0.020939156413078308,
+         -0.21226251125335693
+        ],
+        "v_rms": 1.4029918909072876,
+        "v_absmax": 6.920189380645752
+       },
+       {
+        "index": 1,
+        "t": 0.6,
+        "rms": 0.7074605822563171,
+        "absmax": 3.1972570419311523,
+        "proj": [
+         -0.2601343095302582,
+         -0.003325849771499634
+        ],
+        "v_rms": 1.4003527164459229,
+        "v_absmax": 6.751781463623047
+       }
+      ],
+      "delta_initial": [
+       {
+        "index": 0,
+        "t": 0.6818181818181819,
+        "rms": 1.2015628814697266,
+        "absmax": 4.961014747619629,
+        "proj": [
+         0.2982465624809265,
+         -0.9537838697433472
+        ],
+        "v_rms": 1.8613473176956177,
+        "v_absmax": 19.58765983581543
+       },
+       {
+        "index": 1,
+        "t": 0.6,
+        "rms": 1.181862235069275,
+        "absmax": 5.106346607208252,
+        "proj": [
+         0.04053451865911484,
+         -0.7497349977493286
+        ],
+        "v_rms": 1.4938009977340698,
+        "v_absmax": 9.54358959197998
+       }
+      ],
+      "delta_final": [
+       {
+        "index": 0,
+        "t": 0.6818181818181819,
+        "rms": 1.1317138671875,
+        "absmax": 4.8441009521484375,
+        "proj": [
+         0.430580198764801,
+         -1.0023521184921265
+        ],
+        "v_rms": 2.638559103012085,
+        "v_absmax": 19.853038787841797
+       },
+       {
+        "index": 1,
+        "t": 0.6,
+        "rms": 1.0839744806289673,
+        "absmax": 4.397324562072754,
+        "proj": [
+         0.17226026952266693,
+         -0.6942862272262573
+        ],
+        "v_rms": 1.544179916381836,
+        "v_absmax": 9.30270004272461
+       }
+      ]
+     },
+     "branch_t": 0.6818181818181819,
+     "resume_t": 0.5,
+     "i_branch": 7,
+     "k": 2,
+     "n_voxels": 3328,
+     "out_of_window": false,
+     "branch_noise_scale": 1.0,
+     "trust_region": 3.0,
+     "eps_rms": 1.0018529891967773,
+     "base_rms": 0.758040189743042,
+     "perturbation_relative": 1.3216357231140137,
+     "thickness_valid_ref": true,
+     "watertight_ref": false,
+     "breakdown": {
+      "reference": {
+       "detail_reward": 0.8885917603991782,
+       "overhang_penalty": 0.22738546299138046,
+       "thickness_penalty": 0.07963531756957952,
+       "topology_penalty": 0.14052500664106837
+      },
+      "delta_initial": {
+       "detail_reward": 0.9848280248679189,
+       "overhang_penalty": 0.17530432035432358,
+       "thickness_penalty": 0.3152025460453885,
+       "topology_penalty": 0.4438294705284233
+      },
+      "delta_final": {
+       "detail_reward": 0.8736290463358465,
+       "overhang_penalty": 0.17050128271228146,
+       "thickness_penalty": 0.24718119017643114,
+       "topology_penalty": 0.40313427542048574
+      }
+     },
+     "proxy_reference": 682.9830932617188,
+     "resumed_from": "reference",
+     "delta_won_initial": false,
+     "delta_won_final": false,
+     "verdict_flipped": false,
+     "gain_perturbation": -0.10241504456437917,
+     "gain_steering": -0.03633982526567603,
+     "gain_total": -0.1387548698300552,
+     "loss_first": 1029.565185546875,
+     "loss_last": 453.22662353515625,
+     "rms_first": 0.9954075217247009,
+     "rms_last": 0.9900131821632385,
+     "proxy_first": 1712.5482177734375,
+     "proxy_last": 1136.209716796875,
+     "latent_steps_traced": 7
+    },
+    {
+     "branch_index": 1,
+     "scores": {
+      "reference": 0.7113385441264621,
+      "delta_initial": 0.3182392169023041,
+      "delta_final": 0.33995070242287
+     },
+     "cmp": {
+      "reference": 0.7113385441264621,
+      "delta_initial": 0.3182392169023041,
+      "delta_final": 0.33995070242287
+     },
+     "loss_history": [
+      1562.7850341796875,
+      1474.1126708984375,
+      1394.4273681640625
+     ],
+     "proxy_history": [
+      2229.52294921875,
+      2140.8505859375,
+      2061.165283203125
+     ],
+     "rms_history": [
+      0.9910475015640259,
+      0.9831857085227966,
+      0.9755989909172058
+     ],
+     "n_grad_steps": 3,
+     "latent_path": {
+      "fork": [
+       {
+        "index": -1,
+        "t": 0.3750000000000001,
+        "rms": 0.7242094278335571,
+        "absmax": 3.3964626789093018,
+        "proj": [
+         -0.5306410789489746,
+         0.27263620495796204
+        ]
+       }
+      ],
+      "reference": [
+       {
+        "index": 0,
+        "t": 0.3750000000000001,
+        "rms": 0.8031924366950989,
+        "absmax": 3.8767733573913574,
+        "proj": [
+         -0.8843084573745728,
+         0.628025233745575
+        ],
+        "v_rms": 1.3549491167068481,
+        "v_absmax": 6.158374309539795
+       },
+       {
+        "index": 1,
+        "t": 0.21428571428571436,
+        "rms": 0.9793070554733276,
+        "absmax": 4.61672306060791,
+        "proj": [
+         -1.3827019929885864,
+         1.0960644483566284
+        ],
+        "v_rms": 1.3098244667053223,
+        "v_absmax": 6.036923408508301
+       }
+      ],
+      "delta_initial": [
+       {
+        "index": 0,
+        "t": 0.3750000000000001,
+        "rms": 1.3183972835540771,
+        "absmax": 6.335526943206787,
+        "proj": [
+         -0.7998114228248596,
+         0.23179133236408234
+        ],
+        "v_rms": 0.9938938617706299,
+        "v_absmax": 4.694540977478027
+       },
+       {
+        "index": 1,
+        "t": 0.21428571428571436,
+        "rms": 1.5129249095916748,
+        "absmax": 7.223599910736084,
+        "proj": [
+         -1.0175114870071411,
+         0.2791943848133087
+        ],
+        "v_rms": 1.081389307975769,
+        "v_absmax": 4.983551025390625
+       }
+      ],
+      "delta_final": [
+       {
+        "index": 0,
+        "t": 0.3750000000000001,
+        "rms": 1.2822636365890503,
+        "absmax": 6.185729503631592,
+        "proj": [
+         -0.7118618488311768,
+         0.21797598898410797
+        ],
+        "v_rms": 0.9654393792152405,
+        "v_absmax": 4.430057048797607
+       },
+       {
+        "index": 1,
+        "t": 0.21428571428571436,
+        "rms": 1.4643810987472534,
+        "absmax": 7.073346138000488,
+        "proj": [
+         -0.8555923104286194,
+         0.2862173318862915
+        ],
+        "v_rms": 1.0410364866256714,
+        "v_absmax": 4.814131736755371
+       }
+      ]
+     },
+     "branch_t": 0.3750000000000001,
+     "resume_t": 0.0,
+     "i_branch": 10,
+     "k": 2,
+     "n_voxels": 3328,
+     "out_of_window": false,
+     "branch_noise_scale": 1.0,
+     "trust_region": 3.0,
+     "eps_rms": 0.9991437196731567,
+     "base_rms": 0.7242094278335571,
+     "perturbation_relative": 1.3796336650848389,
+     "thickness_valid_ref": true,
+     "watertight_ref": false,
+     "breakdown": {
+      "reference": {
+       "detail_reward": 0.9892084222804493,
+       "overhang_penalty": 0.22576825034150094,
+       "thickness_penalty": 0.0449748739339302,
+       "topology_penalty": 0.14253507757111922
+      },
+      "delta_initial": {
+       "detail_reward": 0.9625149338846797,
+       "overhang_penalty": 0.15793751197662836,
+       "thickness_penalty": 0.4631462942969233,
+       "topology_penalty": 0.46383821417647764
+      },
+      "delta_final": {
+       "detail_reward": 0.9695497687229477,
+       "overhang_penalty": 0.15922440806966437,
+       "thickness_penalty": 0.44811313466201663,
+       "topology_penalty": 0.4452304713679351
+      }
+     },
+     "proxy_reference": 666.7379150390625,
+     "resumed_from": "reference",
+     "delta_won_initial": false,
+     "delta_won_final": false,
+     "verdict_flipped": false,
+     "gain_perturbation": -0.393099327224158,
+     "gain_steering": 0.0217114855205659,
+     "gain_total": -0.3713878417035921,
+     "loss_first": 1562.7850341796875,
+     "loss_last": 1394.4273681640625,
+     "rms_first": 0.9910475015640259,
+     "rms_last": 0.9755989909172058,
+     "proxy_first": 2229.52294921875,
+     "proxy_last": 2061.165283203125,
+     "latent_steps_traced": 7
+    }
+   ]
+  },
+  {
+   "run_id": "20260804-133448-5ba479",
+   "status": "ok",
+   "is_synthetic": false,
+   "error": null,
+   "started_at": 1785843288.9167051,
+   "duration_seconds": 2237.9,
+   "image": "image.png",
+   "pipeline_type": "512",
+   "steps_requested": null,
+   "steps_actual": 12,
+   "seed": 42,
+   "target_faces": 600000,
+   "num_branches_requested": 1,
+   "num_branches_actual": 1,
+   "model_id": "microsoft/TRELLIS.2-4B",
+   "pid": 23095,
+   "n_events": 53,
+   "has_latent_telemetry": true,
+   "watertight": false,
+   "vertex_count": 368159,
+   "face_count": 734996,
+   "generation_seconds": 2053.0337269306183,
+   "postprocess_seconds": 93.18779611587524,
+   "overhang_pct": 12.335719354103729,
+   "chamfer": 0.006752681446100002,
+   "hausdorff": 0.1071836103626778,
+   "volume_change_pct": null,
+   "vanilla_seconds": null,
+   "vanilla_face_count": null,
+   "branches": [
+    {
+     "branch_index": 0,
+     "scores": {
+      "reference": 0.6084652194928916,
+      "delta_initial": 0.5879409852021344,
+      "delta_final": 0.6027208497895957
+     },
+     "cmp": {
+      "reference": 0.6084652194928916,
+      "delta_initial": 0.5879409852021344,
+      "delta_final": 0.6027208497895957
+     },
+     "loss_history": [
+      23.59075927734375,
+      3.5758755207061768,
+      6.734832286834717,
+      3.0172743797302246,
+      -0.0,
+      -0.0,
+      -0.0,
+      -0.0,
+      -0.0,
+      -0.0,
+      -0.0,
+      -0.0,
+      -0.0,
+      -0.0,
+      -0.0
+     ],
+     "proxy_history": [
+      680.3267822265625,
+      660.2835083007812,
+      663.4696655273438,
+      659.703125,
+      637.8931884765625,
+      637.8931884765625,
+      637.8931884765625,
+      637.8931884765625,
+      637.8931884765625,
+      637.8931884765625,
+      637.8931884765625,
+      637.8931884765625,
+      637.8931884765625,
+      637.8931884765625,
+      637.8931884765625
+     ],
+     "rms_history": [
+      0.5022245049476624,
+      0.5018246173858643,
+      0.5015912055969238,
+      0.5009164810180664,
+      0.5009164810180664,
+      0.5009164810180664,
+      0.5009164810180664,
+      0.5009164810180664,
+      0.5009164810180664,
+      0.5009164810180664,
+      0.5009164810180664,
+      0.5009164810180664,
+      0.5009164810180664,
+      0.5009164810180664,
+      0.5009164810180664
+     ],
+     "n_grad_steps": 15,
+     "latent_path": {
+      "fork": [
+       {
+        "index": -1,
+        "t": 0.6818181818181819,
+        "rms": 0.758040189743042,
+        "absmax": 3.5019521713256836,
+        "proj": [
+         0.1312871128320694,
+         -0.3694761395454407
+        ]
+       }
+      ],
+      "reference": [
+       {
+        "index": 0,
+        "t": 0.6818181818181819,
+        "rms": 0.7247440218925476,
+        "absmax": 3.394920587539673,
+        "proj": [
+         -0.020939156413078308,
+         -0.21226251125335693
+        ],
+        "v_rms": 1.4029918909072876,
+        "v_absmax": 6.920189380645752
+       },
+       {
+        "index": 1,
+        "t": 0.6,
+        "rms": 0.7074605822563171,
+        "absmax": 3.1972570419311523,
+        "proj": [
+         -0.2601343095302582,
+         -0.003325849771499634
+        ],
+        "v_rms": 1.4003527164459229,
+        "v_absmax": 6.751781463623047
+       },
+       {
+        "index": 2,
+        "t": 0.5,
+        "rms": 0.7242094278335571,
+        "absmax": 3.3964626789093018,
+        "proj": [
+         -0.5306410789489746,
+         0.27263620495796204
+        ],
+        "v_rms": 1.3681050539016724,
+        "v_absmax": 6.438800811767578
+       }
+      ],
+      "delta_initial": [
+       {
+        "index": 0,
+        "t": 0.6818181818181819,
+        "rms": 0.8472023010253906,
+        "absmax": 3.565760850906372,
+        "proj": [
+         0.2582772374153137,
+         -0.6561646461486816
+        ],
+        "v_rms": 1.8013732433319092,
+        "v_absmax": 15.385947227478027
+       },
+       {
+        "index": 1,
+        "t": 0.6,
+        "rms": 0.8059694766998291,
+        "absmax": 3.4049055576324463,
+        "proj": [
+         -0.023181427270174026,
+         -0.3765415549278259
+        ],
+        "v_rms": 1.5317214727401733,
+        "v_absmax": 9.912248611450195
+       },
+       {
+        "index": 2,
+        "t": 0.5,
+        "rms": 0.7975805401802063,
+        "absmax": 3.4191951751708984,
+        "proj": [
+         -0.2870749533176422,
+         -0.04645988345146179
+        ],
+        "v_rms": 1.4360687732696533,
+        "v_absmax": 6.628697395324707
+       }
+      ],
+      "delta_final": [
+       {
+        "index": 0,
+        "t": 0.6818181818181819,
+        "rms": 0.8479597568511963,
+        "absmax": 3.5933899879455566,
+        "proj": [
+         0.20025546848773956,
+         -0.7073811888694763
+        ],
+        "v_rms": 1.6956900358200073,
+        "v_absmax": 20.179454803466797
+       },
+       {
+        "index": 1,
+        "t": 0.6,
+        "rms": 0.8040071129798889,
+        "absmax": 3.3419902324676514,
+        "proj": [
+         -0.01735052280128002,
+         -0.5116484761238098
+        ],
+        "v_rms": 1.5381872653961182,
+        "v_absmax": 8.293002128601074
+       },
+       {
+        "index": 2,
+        "t": 0.5,
+        "rms": 0.7929063439369202,
+        "absmax": 3.4417688846588135,
+        "proj": [
+         -0.2837928533554077,
+         -0.18816664814949036
+        ],
+        "v_rms": 1.4402780532836914,
+        "v_absmax": 6.5508599281311035
+       }
+      ]
+     },
+     "branch_t": 0.6818181818181819,
+     "resume_t": 0.3750000000000001,
+     "i_branch": 7,
+     "k": 3,
+     "n_voxels": 3328,
+     "out_of_window": false,
+     "branch_noise_scale": 0.5,
+     "trust_region": 1.5,
+     "eps_rms": 0.5009264945983887,
+     "base_rms": 0.758040189743042,
+     "perturbation_relative": 0.6608178615570068,
+     "thickness_valid_ref": true,
+     "watertight_ref": false,
+     "breakdown": {
+      "reference": {
+       "detail_reward": 0.8895990494022636,
+       "overhang_penalty": 0.2250000238457778,
+       "thickness_penalty": 0.04892619453859663,
+       "topology_penalty": 0.14415223049995513
+      },
+      "delta_initial": {
+       "detail_reward": 0.8723469535269063,
+       "overhang_penalty": 0.22716887345163964,
+       "thickness_penalty": 0.0498156203035436,
+       "topology_penalty": 0.14842949139177292
+      },
+      "delta_final": {
+       "detail_reward": 0.8963528069494002,
+       "overhang_penalty": 0.22538071820452857,
+       "thickness_penalty": 0.06129240653917573,
+       "topology_penalty": 0.1391766483220028
+      }
+     },
+     "proxy_reference": 656.7360229492188,
+     "resumed_from": "reference",
+     "delta_won_initial": false,
+     "delta_won_final": false,
+     "verdict_flipped": false,
+     "gain_perturbation": -0.020524234290757115,
+     "gain_steering": 0.014779864587461278,
+     "gain_total": -0.005744369703295837,
+     "loss_first": 23.59075927734375,
+     "loss_last": -0.0,
+     "rms_first": 0.5022245049476624,
+     "rms_last": 0.5009164810180664,
+     "proxy_first": 680.3267822265625,
+     "proxy_last": 637.8931884765625,
+     "latent_steps_traced": 10
+    }
+   ]
+  },
+  {
+   "run_id": "synthetic-demo",
+   "status": "ok",
+   "is_synthetic": true,
+   "error": null,
+   "started_at": 1785755410.5096269,
+   "duration_seconds": 0.2,
+   "image": "shoe_input.png",
+   "pipeline_type": "512",
+   "steps_requested": 24,
+   "steps_actual": 24,
+   "seed": 42,
+   "target_faces": 1000000,
+   "num_branches_requested": 2,
+   "num_branches_actual": 2,
+   "model_id": "microsoft/TRELLIS.2-4B (synthetic demo)",
+   "pid": 71234,
+   "n_events": 50,
+   "has_latent_telemetry": false,
+   "watertight": true,
+   "vertex_count": 250133,
+   "face_count": 500000,
+   "generation_seconds": 1469.0,
+   "postprocess_seconds": 38.2,
+   "overhang_pct": 8.4,
+   "chamfer": 0.0021,
+   "hausdorff": 0.019,
+   "volume_change_pct": 1.8,
+   "vanilla_seconds": 1290.0,
+   "vanilla_face_count": 320,
+   "branches": [
+    {
+     "branch_index": 0,
+     "scores": {
+      "reference": -0.02225374079345565,
+      "delta_initial": 0.22457834024516263,
+      "delta_final": 0.06187124208017322
+     },
+     "cmp": {
+      "reference": -0.02225374079345565,
+      "delta_initial": 0.22457834024516263,
+      "delta_final": 0.06187124208017322
+     },
+     "loss_history": [
+      0.8544183373451233,
+      0.7590264678001404,
+      0.6645756363868713
+     ],
+     "proxy_history": [
+      785.5155639648438,
+      785.68798828125,
+      785.8736572265625
+     ],
+     "rms_history": [
+      0.020105773583054543,
+      0.02010669931769371,
+      0.020107971504330635
+     ],
+     "n_grad_steps": 3,
+     "latent_path": {},
+     "branch_t": 0.7083333333333334,
+     "resume_t": 0.625,
+     "i_branch": 7,
+     "k": 2,
+     "n_voxels": 1475,
+     "out_of_window": false,
+     "branch_noise_scale": 0.02,
+     "trust_region": 0.06,
+     "thickness_valid_ref": true,
+     "watertight_ref": true,
+     "breakdown": {
+      "reference": {
+       "detail_reward": 0.020658934850247633,
+       "overhang_penalty": 0.04291267564370328,
+       "thickness_penalty": 0.0,
+       "topology_penalty": 0.0
+      },
+      "delta_initial": {
+       "detail_reward": 0.2729167368740477,
+       "overhang_penalty": 0.048338396628885096,
+       "thickness_penalty": 0.0,
+       "topology_penalty": 0.0
+      },
+      "delta_final": {
+       "detail_reward": 0.10627782672765779,
+       "overhang_penalty": 0.044406584647484565,
+       "thickness_penalty": 0.0,
+       "topology_penalty": 0.0
+      }
+     },
+     "proxy_reference": 785.815673828125,
+     "resumed_from": "delta",
+     "delta_won_initial": true,
+     "delta_won_final": true,
+     "verdict_flipped": false,
+     "gain_perturbation": 0.24683208103861828,
+     "gain_steering": -0.1627070981649894,
+     "gain_total": 0.08412498287362888,
+     "loss_first": 0.8544183373451233,
+     "loss_last": 0.6645756363868713,
+     "rms_first": 0.020105773583054543,
+     "rms_last": 0.020107971504330635,
+     "proxy_first": 785.5155639648438,
+     "proxy_last": 785.8736572265625,
+     "latent_steps_traced": 0
+    },
+    {
+     "branch_index": 1,
+     "scores": {
+      "reference": -0.018025530042699106,
+      "delta_initial": 0.2226052008395681,
+      "delta_final": 0.07265036714434525
+     },
+     "cmp": {
+      "reference": -0.018025530042699106,
+      "delta_initial": 0.2226052008395681,
+      "delta_final": 0.07265036714434525
+     },
+     "loss_history": [
+      0.71203,
+      0.69881,
+      0.70452
+     ],
+     "proxy_history": [
+      612.409,
+      611.882,
+      612.031
+     ],
+     "rms_history": [
+      0.019883,
+      0.019901,
+      0.019897
+     ],
+     "n_grad_steps": 3,
+     "latent_path": {},
+     "branch_t": 0.29166666666666674,
+     "resume_t": 0.20833333333333337,
+     "i_branch": 17,
+     "k": 2,
+     "n_voxels": 1475,
+     "out_of_window": false,
+     "branch_noise_scale": 0.02,
+     "trust_region": 0.06,
+     "thickness_valid_ref": true,
+     "watertight_ref": true,
+     "breakdown": {
+      "reference": {
+       "detail_reward": 0.016733737228700564,
+       "overhang_penalty": 0.03475926727139967,
+       "thickness_penalty": 0.0,
+       "topology_penalty": 0.0
+      },
+      "delta_initial": {
+       "detail_reward": 0.264335807017126,
+       "overhang_penalty": 0.040529766854929705,
+       "thickness_penalty": 0.0012008393226281898,
+       "topology_penalty": 0.0
+      },
+      "delta_final": {
+       "detail_reward": 0.10902288284383119,
+       "overhang_penalty": 0.03637251569948594,
+       "thickness_penalty": 0.0,
+       "topology_penalty": 0.0
+      }
+     },
+     "proxy_reference": 615.774,
+     "resumed_from": "reference",
+     "delta_won_initial": true,
+     "delta_won_final": true,
+     "verdict_flipped": false,
+     "gain_perturbation": 0.24063073088226722,
+     "gain_steering": -0.14995483369522286,
+     "gain_total": 0.09067589718704436,
+     "loss_first": 0.71203,
+     "loss_last": 0.70452,
+     "rms_first": 0.019883,
+     "rms_last": 0.019897,
+     "proxy_first": 612.409,
+     "proxy_last": 612.031,
+     "latent_steps_traced": 0
+    }
+   ]
+  }
+ ]
+}

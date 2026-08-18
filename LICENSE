@@ -1,6 +1,12 @@
 MIT License
 
-Copyright (c) 2026
+Copyright (c) 2026 Ali Alhulaimi
+    -- the web application, the mesh repair pipeline, the LoRA fine-tuning
+       and training stack, the evaluation harnesses, and the deployment.
+
+Copyright (c) 2026 Shivam Kumar
+    -- the original Apple Silicon port this project builds on
+       (third_party/backends, third_party/patches). See THIRD_PARTY.md.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

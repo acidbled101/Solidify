@@ -1,0 +1,248 @@
+<html>
+<head><meta charset="utf-8">
+<style>
+body { font-family: -apple-system, Helvetica, Arial, sans-serif; font-size: 10.5pt; line-height: 1.45; color: #1a1a1a; margin: 34px 42px; }
+h1 { font-size: 19pt; margin: 0 0 2px; border-bottom: 2px solid #333; padding-bottom: 6px; }
+h2 { font-size: 13pt; margin: 22px 0 6px; border-bottom: 1px solid #bbb; padding-bottom: 3px; }
+h3 { font-size: 11pt; margin: 14px 0 4px; }
+.sub { color: #666; font-size: 9pt; margin-bottom: 14px; }
+table { border-collapse: collapse; width: 100%; margin: 8px 0 12px; font-size: 9.5pt; }
+th, td { border: 1px solid #ccc; padding: 4px 7px; text-align: left; }
+th { background: #f0f0f0; }
+td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; }
+code { font-family: Menlo, monospace; font-size: 9pt; background: #f4f4f4; padding: 1px 3px; }
+pre { font-family: Menlo, monospace; font-size: 8.5pt; background: #f6f6f6; padding: 8px; border-left: 3px solid #999; overflow-x: auto; }
+.good { color: #157a3c; font-weight: 600; }
+.bad { color: #b3261e; font-weight: 600; }
+.box { background: #f7f7f9; border-left: 4px solid #555; padding: 8px 12px; margin: 10px 0; }
+.small { font-size: 9pt; color: #555; }
+</style></head>
+<body>
+
+<h1>TRELLIS.2 Printability Fine-Tuning &mdash; Weekly Report</h1>
+<div class="sub">Branch <code>flow-dpo-training</code> &middot; 2026-07-31 to 2026-08-06 &middot; 17 commits &middot; Apple M4, 32&nbsp;GB unified memory</div>
+
+<h2>Abstract</h2>
+<p>Many post-processing libraries and methods were tried to improve quality and printability, adding
+different options for post-processing. <b>manifold3d</b> was found to be the best for 3D printing, and the
+original trimesh pipeline was kept as well. Further research was done on the best way to decrease
+non-manifold edges of the models, and the TriFlow paper on generating artist-like 3D models was read.</p>
+
+<p>Integrating DreamDPO concepts was also tried, with no success. The DreamDPO work for diffusion
+models was read, but the preference discriminator was simulated as a score rather than a VLM, and the
+results showed no gains &mdash; it always chose the reference path for the flow model. That, together with
+a lack of expertise in this area of the theory, led to the decision to work instead on fine-tuning the
+SLat flow model using LoRA methods.</p>
+
+<p>This was tried on a small sample size of 300 curated 3D models from Thingi10K. Initial training
+showed gains, with significantly less non-manifold edges for raw results, without loss in detail. More
+latent data is being collected for training.</p>
+
+<h2>1. Executive summary</h2>
+<p>We retired the inference-time DPO steering approach, established that supervised fine-tuning is the
+better instrument for this problem, built the full data and training pipeline, and completed a
+1,170-step LoRA fine-tune of TRELLIS.2's shape-SLat flow model on 300 clean Thingi10K models.</p>
+
+<p><b>The fine-tune works on the axes it can reach.</b> Measured on exported meshes, held-out set,
+paired sampling noise:</p>
+
+<table>
+<tr><th>Model</th><th class="n">L_OH (overhang)</th><th class="n">L_Th (thin walls)</th><th class="n">L_Topo</th><th class="n">R_Detail</th></tr>
+<tr><td>Base model</td><td class="n">0.2291</td><td class="n">0.1133</td><td class="n">0.1871</td><td class="n">0.4316</td></tr>
+<tr><td>step 750</td><td class="n">0.2183 (&minus;5%)</td><td class="n good">0.0152 (&minus;87%)</td><td class="n">0.0500 (&minus;73%)</td><td class="n">0.4578 (+6%)</td></tr>
+<tr><td>step 900</td><td class="n">0.2255 (&minus;2%)</td><td class="n">0.0299 (&minus;74%)</td><td class="n">0.0635 (&minus;66%)</td><td class="n">0.4411 (+2%)</td></tr>
+<tr><td><b>step 1050</b></td><td class="n">0.2179 (&minus;5%)</td><td class="n good">0.0159 (&minus;86%)</td><td class="n good">0.0340 (&minus;82%)</td><td class="n">0.4358 (+1%)</td></tr>
+</table>
+
+<p>Step 1050 beats the base model on thin-wall penalty for <b>6 of 6</b> held-out objects. Image
+fidelity did <i>not</i> degrade (0.897 &rarr; 0.908&ndash;0.913), and surface detail slightly increased,
+so this is not printability bought by smoothing the model into generic blobs.</p>
+
+<div class="box"><b>Three caveats stated up front.</b>
+(1) Overhang never moved on any checkpoint.
+(2) Watertightness is unchanged and cannot be changed by this training &mdash; it is a decoder property.
+(3) The run diverged at ~step 1100 due to a missing LR schedule; the last 70 steps are worthless and
+the final model is <i>not</i> the best model.</div>
+
+<h2>2. What was discovered</h2>
+
+<h3>2.1 The retired approach failed for a diagnosable reason</h3>
+<p>Rather than using a VLM, the preference discriminator was simulated as a score. It produced no
+gains, and always chose the reference path for the flow model. The measurements below say the same
+thing from the other side.</p>
+
+<p>Inference-time DPO steering produced a gradient contribution of <b>&minus;0.0027 &plusmn; 0.0078</b> over
+17 scored forks &mdash; indistinguishable from zero. Root cause: the only differentiable scalar available
+(<code>slat_detail_proxy</code>) agreed with the judge's within-fork argmax <b>5.9%</b> of the time against
+a 33% chance line, with mean Spearman &minus;0.265. The optimiser worked; its objective was
+near-orthogonal to the goal.</p>
+
+<h3>2.2 The "differentiability wall" did not exist</h3>
+<p>The premise that mesh extraction blocks gradients is false. TRELLIS.2's decoder is dual-grid and
+regresses vertex positions smoothly (<code>vertices = (1+2&middot;margin)&middot;sigmoid(...) &minus; margin</code>);
+only connectivity is boolean. Six weeks of design rested on an unverified assertion that took one
+inspection of two source files to refute.</p>
+
+<h3>2.3 The VAE bounds what any flow-model training can achieve</h3>
+<p>Encoding a perfectly watertight mesh and decoding it straight back:</p>
+<table>
+<tr><th>Property</th><th>Result</th></tr>
+<tr><td>Shape fidelity</td><td class="good">Preserved &mdash; Chamfer 0.0052, p95 0.0101, bounding box exact</td></tr>
+<tr><td>Watertightness</td><td class="bad">0 of 2 preserved</td></tr>
+<tr><td>Defect rate (full mesh)</td><td>0.086% open edges, 0.095% non-manifold</td></tr>
+<tr><td>Components</td><td>953, but largest is 99.85% of faces &mdash; and still not watertight alone</td></tr>
+</table>
+<p><b>Consequence:</b> geometry-carried printability (thickness, overhang, bulk shape) is reachable by
+training the flow model; watertightness is not, and belongs to post-processing. This single 20-minute
+measurement redirected the entire project.</p>
+
+<h3>2.4 The judge inflates topology defects ~50x</h3>
+<p><code>geometric_judge</code> decimates before scoring. Measured on the same mesh: <b>0.086%</b> open-edge
+rate on the full mesh versus <b>4.25%</b> after the judge's preprocessing. Every historical
+<code>L_Topo</code> figure is therefore dominated by decimation artifacts rather than real decoder
+defects. Any topology claim must be measured on the undecimated mesh.</p>
+
+<h3>2.5 Measurement noise nearly made the whole run uninterpretable</h3>
+<p>Two evaluations of the <i>same</i> base model gave L_OH 0.2889 and 0.3871 &mdash; a 34% swing from
+sampling noise alone, larger than any plausible training effect. Fixed by seeding sampling noise per
+held-out object and reusing it at every evaluation (common random numbers). Consecutive evals are now
+bit-identical, so any movement is attributable to the model.</p>
+
+<h3>2.6 Silent failures dominated the engineering cost</h3>
+<p>Every significant delay this week was a silent failure, not a crash:</p>
+<table>
+<tr><th>Symptom</th><th>Actual cause</th><th>Cost</th></tr>
+<tr><td>Training step took 464s</td><td>No activation checkpointing &rarr; 38&nbsp;GB retained on a 32&nbsp;GB machine &rarr; swap thrashing (24.4&nbsp;GB of 25.6&nbsp;GB swap in use). Did not OOM, just degraded.</td><td>18x slowdown</td></tr>
+<tr><td>Baseline eval returned <code>n_eval=0</code></td><td>Three stacked bugs, masked by <code>except: continue</code></td><td>2 invalidated launches</td></tr>
+<tr><td>Eval decoder on CPU</td><td><code>low_vram</code> is device placement, not a memory hint; clearing it stranded the decoder</td><td>1 launch</td></tr>
+<tr><td>Sample-evolution panel empty</td><td>A patch silently failed to match; the call site was never added</td><td>whole run, cosmetic</td></tr>
+<tr><td>Loss chart nonsense</td><td>Dataset build logged token counts into the <code>loss</code> field</td><td>misleading chart</td></tr>
+</table>
+<p class="small">The single highest-leverage change all week was replacing <code>except Exception: continue</code>
+with recorded, printed failures. It converted two blind retries into one-step diagnoses.</p>
+
+<h3>2.7 Post-processing was addressed before generation was</h3>
+<p>Many post-processing libraries and methods were tried to improve quality and printability, with
+different options added to the pipeline. <b>manifold3d</b> was found to be the best for 3D printing and
+was added, with the original trimesh pipeline kept alongside it. Separate research was done on the
+best way to decrease non-manifold edges, and the TriFlow paper on generating artist-like 3D models
+was read.</p>
+
+<p>This matters for reading the rest of this report: the fine-tuning results quoted here are on
+<b>raw</b> decoder output, with no post-processing applied. The reduction in non-manifold edges is
+therefore a gain made <i>before</i> manifold3d or trimesh repair runs, not instead of them. Both remain
+in the pipeline, and the round-trip result in &sect;2.3 is why &mdash; watertightness is a decoder property
+that fine-tuning cannot reach.</p>
+
+<h2>3. What was built</h2>
+<table>
+<tr><th>Component</th><th>File</th><th>Note</th></tr>
+<tr><td>CPU mesh &rarr; SLat encoder</td><td><code>backends/dual_grid_cpu.py</code></td><td>o-voxel ships CUDA-only; rebuilt the pure-C++ voxelizer for Apple Silicon</td></tr>
+<tr><td>Offscreen renderer</td><td><code>trellis_core/render_mesh.py</code></td><td>moderngl, Metal-backed, headless; camera fitted per-mesh to bounding sphere</td></tr>
+<tr><td>Dataset pipeline</td><td><code>trellis_core/dataset_build.py</code></td><td>300 models, 3.2 GPU-hours, 0 failures</td></tr>
+<tr><td>LoRA</td><td><code>trellis_core/lora.py</code></td><td>210 modules, 18.68M params (1.4% of 1.29B)</td></tr>
+<tr><td>SFT trainer</td><td><code>trellis_core/sft_train.py</code></td><td>Hyperparameters from TRELLIS.2's own config</td></tr>
+<tr><td>Live dashboard</td><td><code>devlab/train_server.py</code></td><td>Crash-independent; phone access over Tailscale</td></tr>
+<tr><td>VAE round-trip test</td><td><code>trellis_core/vae_roundtrip.py</code></td><td>Established the ceiling</td></tr>
+<tr><td>Mesh exporter</td><td><code>trellis_core/export_samples.py</code></td><td>Reproduces eval exactly (same seeds, same CFG)</td></tr>
+<tr><td>Topology test</td><td><code>trellis_core/topology_test.py</code></td><td>Paired, undecimated, multi-seed</td></tr>
+</table>
+
+<h3>Dataset</h3>
+<p>Thingi10K via its HuggingFace mirror. The corpus is deliberately a record of real-world
+3D-printing messiness &mdash; its own figures are 50% non-solid, 45% self-intersecting, 26%
+multi-component, 22% non-manifold. Filtering to <i>Closed + edge/vertex manifold + single component +
+PWN + no degenerate faces + zero self-intersections</i> leaves <b>3,935 of 10,000</b>. We used 300
+(270 train / 30 held-out); median latent 2,233 voxels; 666&nbsp;MB.</p>
+
+<h3>Training run</h3>
+<pre>run id        sft-1200-20260806-0119
+steps         1,170 of 1,200 (stopped after divergence)
+epochs        8.7 over 270 examples
+GPU time      9.96 hours, mean 30.7 s/step
+LoRA          rank 16, alpha 32, lr 1e-4 constant, AdamW wd 0.01
+schedule      uniform t, p_uncond 0.1 (both from TRELLIS.2's official config)
+evals         10, every 150 steps, 6 held-out objects, common random numbers</pre>
+
+<h2>4. The divergence</h2>
+<table>
+<tr><th>Steps</th><th class="n">Mean loss</th><th class="n">Max loss</th><th class="n">Grad norm</th></tr>
+<tr><td>1&ndash;1100</td><td class="n">~0.16</td><td class="n">0.80</td><td class="n">0.03&ndash;0.06</td></tr>
+<tr><td>1101&ndash;1170</td><td class="n bad">3.48</td><td class="n bad">57.29</td><td class="n bad">332.25</td></tr>
+</table>
+<p>Held-out loss went 0.0859 &rarr; 10.29; image similarity 0.908 &rarr; 0.202. The model was destroyed.
+Two causes, both mine: <b>no learning-rate decay</b> (constant 1e-4 for 8.7 epochs), and gradient
+clipping that bounded each update but could not prevent AdamW's moments accumulating through a
+sustained blow-up. Checkpoints 750/900/1050 were preserved before stopping, because a clean stop
+writes a final checkpoint and <code>prune_checkpoints(keep=3)</code> would have deleted step 750.</p>
+
+<h2>5. How to log improvements numerically</h2>
+<p>Recommended standard for every future comparison. The first three are non-negotiable given what we
+measured this week.</p>
+
+<h3>5.1 Always paired, never pooled</h3>
+<p>Fix the sampling noise per held-out object and reuse it across every model being compared. Report
+<i>per-object deltas</i> and a win count, not two means. Justification: 96.8% of judge-score variance
+is between-object, and a pooled metric previously scored raw vertex count at r=0.959 while a perfect
+within-fork ranker scored 0.180.</p>
+
+<h3>5.2 Always against a baseline</h3>
+<p>Every run begins with a step-0 evaluation of the base model with adapters disabled. A printability
+number without the base value on the same axes cannot indicate whether training helped.</p>
+
+<h3>5.3 Always report fidelity beside printability</h3>
+<p>Minimum pair: a printability metric and <code>image_similarity</code> (silhouette IoU against the
+conditioning render). A printability gain with fidelity falling is a regression. Precedent: a 2-D
+experiment tripled its reward while collapsing all 3,000 samples onto one geometry.</p>
+
+<h3>5.4 The metric set</h3>
+<table>
+<tr><th>Metric</th><th>Source</th><th>Direction</th><th>Notes</th></tr>
+<tr><td><code>L_Th</code></td><td>judge</td><td>lower</td><td>Responds strongly. Primary success axis.</td></tr>
+<tr><td><code>nonmanifold_rate</code>, <code>open_rate</code></td><td>full mesh</td><td>lower</td><td><b>Must</b> be computed undecimated (see 2.4)</td></tr>
+<tr><td><code>L_OH</code></td><td>judge</td><td>lower</td><td>Has not responded; also only ~5% of it is genuine support cost</td></tr>
+<tr><td><code>R_Detail</code></td><td>judge</td><td>context</td><td>Fidelity term, not printability &mdash; no better/worse verdict</td></tr>
+<tr><td><code>image_similarity</code></td><td>silhouette IoU</td><td>higher</td><td>Prompt-adherence guard</td></tr>
+<tr><td><code>sample_dispersion</code></td><td>latent means</td><td>flat</td><td>Collapse guard</td></tr>
+<tr><td><code>watertight_rate</code></td><td>full mesh</td><td>control</td><td>Expected flat; a change indicates a bug, not progress</td></tr>
+<tr><td>support volume</td><td><i>slicer, not yet built</i></td><td>lower</td><td>The only metric outside the training reward</td></tr>
+</table>
+
+<h3>5.5 The acceptance bar</h3>
+<p>Improvement over the base model is <i>not</i> the bar. The bar is:</p>
+<pre>capture = (tuned_1_sample - base_1_sample) / (base_best_of_N - base_1_sample)</pre>
+<p>A single sample from the tuned model must recover a meaningful fraction of what N-fold rejection
+sampling buys from the base model at matched compute. <b>This test has not yet been run.</b></p>
+
+<h2>6. Next steps</h2>
+<ol>
+<li><b>Finish the topology consistency test</b> (running: 10 objects &times; 3 seeds &times; 4 models, paired,
+undecimated). Answers whether step 1050's cleaner topology is consistent or a lucky draw.</li>
+<li><b>Run the best-of-N comparison</b> (&sect;5.5). Until this exists we do not know whether the fine-tune
+beats cheap rejection sampling &mdash; the only comparison that justifies the work.</li>
+<li><b>Fix the training schedule and re-run.</b> Cosine LR decay; a skip-step rule that <i>drops</i> a batch
+whose gradient norm exceeds a multiple of the running median rather than clipping it; keep every
+checkpoint. The metrics were still improving when the run broke, so the ceiling was never observed.</li>
+<li><b>Repair the judge</b> before it is trusted further: make the thickness raycast deterministic
+(test-retest reliability was measured at 0.208, capping any correlation at |r| &le; 0.456), and add a
+support raycast to the overhang term (currently rank-correlates &minus;0.432 with true unsupported area).</li>
+<li><b>Scale the dataset.</b> 270 training objects is the binding constraint, not step count; 3,935 clean
+models are available and prep runs at ~40&nbsp;s/model.</li>
+<li><b>Add a slicer-based support-volume metric</b> as the held-out physical measure that was never part
+of the training reward.</li>
+</ol>
+
+<h2>7. Deliverables on disk</h2>
+<pre>runs/sft-1200-20260806-0119/
+    ckpt_keep/step_{750,900,1050}/adapter.pt   preserved LoRA adapters (643 MB)
+    meshes/step_{0,750,900,1050}/              24 GLB + 24 STL, raw, no post-processing
+    exports/                                   42 PNG frames + 6 progression strips
+    metrics.jsonl                              1,170 train + 10 eval records
+    topology_test.jsonl                        in progress
+data/thingi10k_sft/                            300 latents + images + conditioning</pre>
+
+<p class="small">All meshes are raw decoder output &mdash; no repair, no decimation, no solidify. Each object
+uses identical conditioning and identical sampling noise across all four models, so differences are
+attributable to the model alone.</p>
+
+</body></html>

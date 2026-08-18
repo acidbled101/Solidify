@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DPO Inspector</title>
+<link rel="stylesheet" href="/static/style.css">
+<script type="importmap">
+{ "imports": { "three": "/static/vendor/three.module.js" } }
+</script>
+</head>
+<body>
+
+<header>
+  <h1>DPO Inspector <span class="dim">// trellis_core.dpo_branch</span></h1>
+  <nav class="tabs">
+    <a href="/" class="active">Run inspector</a>
+    <a href="/concept" id="conceptLink">Concept proof</a>
+  </nav>
+  <span id="healthPill" class="health-pill idle"><span class="dot"></span><span id="healthText">checking…</span></span>
+</header>
+
+<div class="layout">
+  <aside class="sidebar">
+    <div>
+      <h2 style="font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-faint);margin:0 0 10px">New run</h2>
+      <form id="runForm">
+        <div class="field">
+          <label>Input image</label>
+          <div id="dropzone" class="dropzone">Click or drop an image</div>
+          <input type="file" id="imageInput" accept="image/*" style="display:none">
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label>Pipeline type</label>
+            <select id="pipelineType"><option value="512">512</option><option value="1024">1024</option></select>
+          </div>
+          <div class="field">
+            <label>Steps</label>
+            <input type="number" id="steps" placeholder="default">
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Seed</label><input type="number" id="seed" value="42"></div>
+          <div class="field"><label>Target faces</label><input type="number" id="targetFaces" value="1000000"></div>
+        </div>
+        <details class="advanced">
+          <summary>DPO branch config</summary>
+          <div class="field-row">
+            <div class="field"><label>num branches</label><input type="number" min="1" id="numBranches" value="1"></div>
+            <div class="field"><label>t_branch <span style="text-transform:none;font-weight:400">(ignored if &gt;1 branch)</span></label><input type="number" step="0.05" id="tBranch" value="0.5"></div>
+          </div>
+          <div class="field-row">
+            <div class="field"><label>noise scale</label><input type="number" step="0.005" id="noiseScale" value="0.02"></div>
+          </div>
+          <div class="field-row">
+            <div class="field"><label>continuation steps</label><input type="number" id="contSteps" value="2"></div>
+            <div class="field"><label>grad steps</label><input type="number" id="gradSteps" value="3"></div>
+          </div>
+          <div class="field"><label>dpo_beta</label><input type="number" step="0.1" id="dpoBeta" value="1.0"></div>
+          <div class="field field-check"><input type="checkbox" id="vanillaToo"><label style="text-transform:none;font-size:12px;color:var(--text-dim)">Also run vanilla for comparison (~2x time)</label></div>
+        </details>
+        <button type="submit" class="primary" id="runBtn" style="width:100%;margin-top:6px">Run</button>
+        <button type="button" class="danger" id="cancelBtn" style="width:100%;margin-top:6px;display:none">Cancel run</button>
+      </form>
+    </div>
+
+    <div class="run-list">
+      <h2>Runs</h2>
+      <div id="runList"><div class="empty-state">no runs yet</div></div>
+    </div>
+  </aside>
+
+  <main>
+    <div id="prodWarning" class="banner hidden">
+      <span id="prodWarningText"></span>
+      <button type="button" class="ghost" id="dismissWarning">dismiss</button>
+    </div>
+
+    <div id="emptyState" class="panel empty-state">Start a run, or select one from the sidebar, to see it here.</div>
+
+    <div id="content" style="display:none; flex-direction:column; gap:18px">
+
+      <section class="panel">
+        <h2>Trajectory <span id="railPhase" class="sub"></span></h2>
+        <p class="explain">The full t=1&rarr;0 sampling schedule. Sampling runs normally up to the branch point, where it forks: a straight reference path (identical to what a normal generation would produce) and an arced delta path (a random perturbation, refined by a few gradient steps under the DPO preference loss). Both are decoded and scored by the judge; the pipeline resumes from whichever one it actually preferred &mdash; so the path shown after the gate is never worse than the reference would have been.</p>
+        <div id="rail"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Branches <span id="branchesSub" class="sub"></span></h2>
+        <p class="explain">One row per fork point (more than one only if "num branches" &gt; 1 in the run config). Click a row to inspect that fork's candidates, score breakdown, gradient steps, and histograms in the panels below &mdash; they always show one branch at a time.</p>
+        <table class="diag" id="branchesTable">
+          <thead><tr><th>#</th><th>branch t</th><th>resumed from</th><th>S reference</th><th>S delta</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </section>
+
+      <section class="panel">
+        <h2>Candidate comparison <span id="candidateSub" class="sub"></span></h2>
+        <p class="explain">Reference (left) and delta (right), decoded directly at the branch point &mdash; before print-prep runs at all, so there is no watertight repair, decimation, or solid infill between you and the raw effect of the perturbation and steering. Toggle to see the delta candidate before vs. after its gradient steps; drag either pane to orbit both together. Use the downloads below to compare the two outside the browser.</p>
+        <div class="viewer-pair">
+          <div class="viewer-pane">
+            <canvas id="canvasLeft"></canvas>
+            <span class="viewer-label ref">reference</span>
+            <span class="viewer-score" id="scoreLeftLabel"></span>
+          </div>
+          <div class="viewer-pane">
+            <canvas id="canvasRight"></canvas>
+            <span class="viewer-label delta" id="rightLabel">delta (initial)</span>
+            <span class="viewer-score" id="scoreRightLabel"></span>
+          </div>
+        </div>
+        <div class="field-row" style="max-width:280px">
+          <button type="button" class="ghost" id="showInitialBtn" style="font-size:11px">show delta_initial</button>
+          <button type="button" class="ghost" id="showFinalBtn" style="font-size:11px">show delta_final</button>
+        </div>
+        <div id="candidateDownloads" class="download-row"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Score breakdown <span class="sub">weighted terms: &alpha;&middot;R_Detail &minus; (&beta;&middot;L_OH + &gamma;&middot;L_Th + &delta;&middot;L_Topo)</span></h2>
+        <p class="explain">A detail reward (higher = more fine surface detail) minus penalties for overhangs, thin walls, and non-manifold/open topology. The judge's actual winner is decided by an <em>unweighted</em> comparison value (shown in the score line above each viewer pane), which can occasionally disagree with the weighted total plotted here &mdash; that disagreement is flagged with a trailing <code>*</code> when thickness scoring was skipped as unreliable for that mesh.</p>
+        <div class="legend">
+          <span><span class="swatch" style="background:#3ED6C4"></span>reference</span>
+          <span><span class="swatch" style="background:#FF9F45"></span>delta (initial)</span>
+          <span><span class="swatch" style="background:#FF6B4A"></span>delta (final)</span>
+        </div>
+        <div id="scoreBars"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Gradient steps <span class="sub">loss / detail proxy / latent RMS, per steering step</span></h2>
+        <p class="explain">Loss is the DPO preference loss on the branch being steered &mdash; it should trend toward 0 if the step is doing what it was told to. Proxy is the differentiable detail-energy term actually being optimized: the <em>only</em> signal the gradient sees (overhang/thickness/topology have no gradient here and only act through which branch the judge preferred). RMS is how far the perturbation has moved from its start, against the dashed trust-region ceiling it is never allowed to cross.</p>
+        <div class="grid-3">
+          <div id="chartLoss"></div>
+          <div id="chartProxy"></div>
+          <div id="chartRms"></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Geometry distributions <span id="histSub" class="sub"></span></h2>
+        <p class="explain">Per-element distributions behind the selected candidate's score, binned server-side (never sent as raw per-face/per-vertex arrays). Detail energy: per-vertex Laplacian magnitude, higher means more fine detail. Overhang: per-face angle-to-gravity cosine &mdash; right of the marked line is past the critical overhang angle and unsupported. Wall thickness: per-ray sampled wall depth &mdash; left of the marked line is thinner than the minimum printable wall. Edge incidence: 1 = open/boundary edge (bad), 2 = normal manifold edge.</p>
+        <div class="field-row" style="max-width:360px;margin-bottom:10px">
+          <select id="histCandidate">
+            <option value="reference">reference</option>
+            <option value="delta_initial">delta (initial)</option>
+            <option value="delta_final">delta (final)</option>
+          </select>
+        </div>
+        <div class="grid-4" id="histGrid"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Run diagnostics</h2>
+        <p class="explain">Config, timings, and print-prep's verdict on the final mesh. "Printable final" below has already been through watertight repair, decimation to the target face count, and solid infill &mdash; for the same result <em>without</em> any of that, download "raw final" instead.</p>
+        <table class="diag" id="diagTable"><tbody></tbody></table>
+        <ul class="notes-list" id="notesList"></ul>
+        <div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-faint);margin:14px 0 8px">Downloads</div>
+        <div id="resultDownloads" class="download-row"></div>
+      </section>
+
+    </div>
+  </main>
+</div>
+
+<script src="/static/charts.js"></script>
+<script type="module" src="/static/app.js"></script>
+</body>
+</html>

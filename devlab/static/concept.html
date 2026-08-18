@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DPO Inspector — Concept Proof</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header>
+  <h1>DPO Inspector <span class="dim">// concept proof</span></h1>
+  <nav class="tabs">
+    <a href="/">Run inspector</a>
+    <a href="/concept" class="active">Concept proof</a>
+  </nav>
+  <span id="metaPill" class="health-pill idle"><span class="dot"></span><span id="metaText">loading…</span></span>
+</header>
+
+<main class="concept">
+
+  <!-- ================= SELECTED RUN ================= -->
+  <section class="panel">
+    <h2>Selected run <span class="sub" id="runSub">—</span></h2>
+    <p class="explain">
+      Every panel in this section is the <strong>real trace of one run</strong>, read from its
+      <code>trace.jsonl</code>. The selector is shared with the Run inspector — pick a run there and it
+      follows you here. Nothing below is modelled, smoothed, or interpolated; where a run predates a
+      given instrument, the panel says so instead of substituting a plausible curve.
+    </p>
+    <div class="run-picker">
+      <select id="runSelect"></select>
+      <a id="openInspector" href="/" class="ghost-link">open in Run inspector →</a>
+    </div>
+    <div id="runSummary" class="stat-row"></div>
+    <div id="runNotice"></div>
+  </section>
+
+  <!-- ------------------------------------------------------------------ -->
+  <section class="panel">
+    <h2>A · Trajectory through the fork <span class="sub">scrub the sampler step</span></h2>
+    <p class="explain">
+      The latent's actual path through sampling, in a fixed 2-D random projection of the full
+      SLat state (<code>LatentProbe</code> in <code>dpo_branch.py</code>). The basis is drawn once
+      per run and reused for every step and every branch. Each basis vector is unit-norm, so the
+      projection <strong>cannot invent separation</strong>: two branches close in the real
+      ~22k-dimensional latent cannot look far apart here. The converse does not hold — two
+      dimensions cannot guarantee that everything far apart in the full space looks far apart on
+      screen, so branches may appear coincident while genuinely differing. Read distance here as a
+      lower bound, not a measurement.
+      <strong>Drag the slider</strong> to walk the run: grey is the single pre-branch trajectory, the
+      ring marks each fork, and past it the three candidates (unperturbed reference, the random
+      perturbation, and the gradient-steered result) diverge. Faint grey is the not-yet-reached path.
+    </p>
+    <div class="scrubber">
+      <input type="range" id="stepSlider" min="0" max="0" value="0">
+      <div class="scrub-readout" id="scrubReadout">—</div>
+    </div>
+    <div id="latentPathChart"></div>
+    <div class="legend">
+      <span><span class="swatch" style="background:#6C7C86"></span>pre-branch / resumed</span>
+      <span><span class="swatch" style="background:#3ED6C4"></span>reference</span>
+      <span><span class="swatch" style="background:#FF9F45"></span>delta (random)</span>
+      <span><span class="swatch" style="background:#FF6B4A"></span>delta (steered)</span>
+      <span><span class="swatch" style="background:#7CE38B"></span>◦ fork</span>
+    </div>
+    <div id="forkDetail" class="callout"></div>
+  </section>
+
+  <!-- ------------------------------------------------------------------ -->
+  <section class="panel">
+    <h2>B · Velocity and latent scale per step <span class="sub">v_θ over the schedule</span></h2>
+    <p class="explain">
+      RMS of the model's predicted velocity <code>v_θ(x,t)</code> and of the latent itself, at every
+      sampler step of this run. <code>v</code> is recovered exactly rather than estimated: the Euler
+      update <em>is</em> <code>x_prev = x − (t−t_prev)·v</code>, so dividing the increment by the
+      timestep returns the velocity the model actually predicted. The vertical marker follows the
+      slider above; dashed lines mark the forks. <strong>What to look for:</strong> whether the
+      perturbation at the fork produces any visible excursion in <code>‖v‖</code> — if the three
+      branches are indistinguishable here, the perturbation is small relative to the flow.
+    </p>
+    <div id="velocityChart"></div>
+    <div class="grid-2" style="margin-top:10px">
+      <div><div id="latentRmsChart"></div></div>
+      <div>
+        <div id="branchDivergenceChart"></div>
+        <div class="legend" style="margin-top:4px">
+          <span><span class="swatch" style="background:#FF9F45"></span>ref ↔ δ random</span>
+          <span><span class="swatch" style="background:#FF6B4A"></span>ref ↔ δ steered</span>
+          <span><span class="swatch" style="background:#7CE38B"></span>δ random ↔ δ steered</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------------------------ -->
+  <section class="panel">
+    <h2>C · What the judge decided, per fork <span class="sub">this run</span></h2>
+    <p class="explain">
+      The three candidate scores at each fork of this run, and what the gradient changed.
+      <code>gain (random)</code> is what the perturbation bought before any steering;
+      <code>gain (steering)</code> is what the gradient added on top. The re-rank gate means a
+      negative steering gain costs compute, not output quality — the run resumes from the reference
+      whenever the steered candidate fails to beat it.
+    </p>
+    <table class="diag" id="runBranchTable"></table>
+    <div class="grid-2" style="margin-top:12px">
+      <div><div id="runLossChart"></div></div>
+      <div><div id="runRmsChart"></div></div>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------------------------ -->
+  <section class="panel">
+    <h2>D · Every run, pooled <span class="sub">the decisive question</span></h2>
+    <p class="explain">
+      One run is an anecdote. This pools <strong>every branch of every real run on disk</strong> —
+      each fork is an independent trial of the same question — and asks the one thing that settles
+      whether the gradient earns its cost: <em>did steering ever change which branch the judge
+      preferred?</em> If the flip rate stays near zero and the mean steering gain stays within noise,
+      best-of-N sampling dominates the whole approach at lower compute.
+      Synthetic demo traces are excluded from the aggregates (and labelled in the CSVs).
+    </p>
+    <div id="poolSummary" class="stat-row"></div>
+    <div id="poolChart"></div>
+    <table class="diag" id="poolTable" style="margin-top:12px"></table>
+    <div class="download-row" style="margin-top:12px">
+      <div class="dl-group"><span class="dl-label">saved metrics</span>
+        <a href="/api/metrics/download/metrics_branches.csv">branches.csv</a>
+        <a href="/api/metrics/download/metrics_runs.csv">runs.csv</a>
+        <a href="/api/metrics/download/metrics.json">metrics.json</a>
+      </div>
+    </div>
+    <div id="poolNote" class="callout warn"></div>
+  </section>
+
+  <!-- ================= MECHANISM ================= -->
+  <section class="panel verdict-panel">
+    <h2>Verdict <span class="sub" id="verdictSub"></span></h2>
+    <p class="explain">
+      Four claims from the brief, each tested rather than illustrated. Where the
+      measurement contradicts the claim, the card says so — a dashboard that can
+      only confirm its own thesis is decoration, not evidence.
+      <strong>These cards summarise the controlled toy experiment</strong>
+      (<code>devlab/alignment_experiment.py</code>, n=3000); panels M1–M4 immediately below now
+      re-ask the same four questions of the <em>real</em> TRELLIS.2 runs, and largely disagree.
+    </p>
+    <div id="verdictCards" class="verdict-grid"></div>
+  </section>
+
+  <!-- ------------------------------------------------------------------ -->
+  <section class="panel">
+    <h2>M1–M4 · The same questions, on real TRELLIS.2 data
+        <span class="sub" id="realMechSub">loading…</span></h2>
+    <p class="explain">
+      Panels M1–M4 below are computed from <strong>real 4B-parameter generation traces</strong>
+      (<code>devlab/real_mechanism.py</code>) — no synthetic frustum, no 33.8K-parameter TinyFlow,
+      no new GPU time. They re-ask the toy's four questions of the pipeline that actually ships.
+      Two things to hold onto while reading them: <strong>n is far smaller</strong> than the toy's
+      3000 (and differs between panels, because latent telemetry was added partway through this
+      session), and <strong>the answers mostly disagree with the toy</strong>. That disagreement is
+      the finding, not a defect in either measurement.
+    </p>
+    <div id="realMechNotice"></div>
+  </section>
+
+  <!-- ------------------------------------------------------------------ -->
+  <section class="panel">
+    <h2>M1 · Velocity along the fork's two paths <span class="sub">real · v_θ on reference vs delta</span></h2>
+    <p class="explain">
+      The toy version of this panel drew "baseline field vs DPO-aligned field" side by side.
+      <strong>That comparison does not exist in the real pipeline</strong> — there is one frozen
+      <code>v_θ</code>, and DPO steers the input latent rather than the weights. So the real
+      analogue is the same field's speed measured along the two trajectories the pipeline genuinely
+      explored from each fork: the unperturbed <em>reference</em> continuation, the
+      <em>random</em> perturbation, and the <em>steered</em> result. Velocity is recovered exactly
+      from the sampler's own <code>pred_v</code>, not estimated.
+    </p>
+    <div id="m1Chart"></div>
+    <div class="legend">
+      <span><span class="swatch" style="background:#3ED6C4"></span>reference</span>
+      <span><span class="swatch" style="background:#FF9F45"></span>delta (random)</span>
+      <span><span class="swatch" style="background:#FF6B4A"></span>delta (steered)</span>
+    </div>
+    <div id="m1Note" class="callout"></div>
+  </section>
+
+  <!-- ------------------------------------------------------------------ -->
+  <section class="panel">
+    <h2>M2 · Path straightness <span class="sub">real · does steering straighten the trajectory?</span></h2>
+    <p class="explain">
+      Tortuosity — arc length ÷ straight-line distance, <code>1.0</code> being a perfectly straight
+      path — measured on the real latent trajectories through each fork window. Scale-free by
+      construction, which is what makes it poolable across runs whose projection bases differ
+      (see <code>real_mechanism.py</code>); raw curvature is not, and raw 2-D positions from
+      different runs are never overlaid here for the same reason.
+    </p>
+    <div id="m2Chart"></div>
+    <div id="m2Note" class="callout"></div>
+  </section>
+
+  <!-- ------------------------------------------------------------------ -->
+  <section class="panel">
+    <h2>M3 · Reward distribution shift <span class="sub">real · every scored fork on disk</span></h2>
+    <p class="explain">
+      Real <code>geometric_judge</code> scores for all three candidates at every fork of every real
+      run: the unperturbed reference, the random perturbation, and the gradient-steered result.
+      Densities, so unequal counts cannot fake a shift; dashed lines are means. Differences are
+      paired within each fork (same image, same seed, same branch point) and bootstrapped.
+    </p>
+    <div id="m3Chart"></div>
+    <div id="m3Stats" class="stat-row"></div>
+    <div id="m3Note" class="callout warn"></div>
+  </section>
+
+  <!-- ------------------------------------------------------------------ -->
+  <section class="panel">
+    <h2>M4 · What the gradient steps actually do <span class="sub">real · one line per branch</span></h2>
+    <p class="explain">
+      The differentiable detail proxy over gradient steps, for every real branch that ran any.
+      Each branch is normalised to its own step-0 gap so the <em>shapes</em> are comparable —
+      these runs used <code>branch_noise_scale</code> from 0.02 to 1.0, which changes the raw
+      magnitudes by four orders of magnitude, so a pooled average across them would be a
+      composition artifact rather than a trend.
+    </p>
+    <div id="m4Chart"></div>
+    <div id="m4Note" class="callout warn"></div>
+  </section>
+
+  <!-- ------------------------------------------------------------------ -->
+  <section class="panel">
+    <h2>M5 · The ODE → SDE mapping <span class="sub toy-badge">toy model — not TRELLIS.2</span></h2>
+    <p class="explain">
+      DPO needs a policy with a tractable likelihood ratio; a deterministic ODE has a Dirac
+      path measure and no usable density. The escape is that the ODE is the σ = 0 member of
+      a family of SDEs that all share its time marginals. The table tests exactly that: the
+      same trained field integrated both ways.
+      <strong>Per-sample RMSE must be large</strong> (different paths) while
+      <strong>mean shift ≈ 0 and std ratio ≈ 1</strong> (same distribution). If only the
+      second held, the SDE would have silently collapsed back to the ODE and the whole
+      argument would be circular.
+    </p>
+    <table class="diag" id="sdeTable"></table>
+    <div class="callout" id="sdeNote"></div>
+  </section>
+
+  <!-- ------------------------------------------------------------------ -->
+  <section class="panel">
+    <h2>M6 · Reference-free alignment <span class="sub toy-badge">toy model — not TRELLIS.2</span></h2>
+    <p class="explain">
+      The reference-based objective needs a second frozen copy of the flow model and a second
+      backward-enabled forward pass per pair. On this repo's own hardware that is not
+      academic: one such forward through the SLat model retains ~9.5 GB of activations, and
+      four of them per gradient step is what produced the 36.27 GiB MPS OOM that
+      <code>checkpointed_blocks()</code> was written to fix. Dropping the reference removes a
+      whole model from memory. The question is what it costs in quality.
+    </p>
+    <table class="diag" id="refFreeTable"></table>
+    <div class="callout" id="refFreeNote"></div>
+  </section>
+
+  <!-- ------------------------------------------------------------------ -->
+  <section class="panel">
+    <h2>M7 · Provenance & limits <span class="sub">what this does and does not show</span></h2>
+    <p class="explain">
+      Every number on this page comes from one reproducible script. What is real and what is
+      a stand-in, stated plainly — including the two claims from the brief that could not be
+      tested here at all.
+    </p>
+    <div id="provenance"></div>
+  </section>
+
+</main>
+
+<script src="/static/charts.js"></script>
+<script src="/static/run_view.js"></script>
+<script src="/static/real_mechanism.js"></script>
+<script src="/static/concept.js"></script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+# Consolidates the git identities I have committed under across three machines
+# (personal laptop, GitHub web, and the FabLab lab machine) into one author.
+# git and GitHub both honour this; no history is rewritten.
+
+Ali Alhulaimi <alialhulaimi2005@gmail.com> <93149738+acidbled101@users.noreply.github.com>
+Ali Alhulaimi <alialhulaimi2005@gmail.com> <scifablab@ollama.local>
+Ali Alhulaimi <alialhulaimi2005@gmail.com> acidbled101 <93149738+acidbled101@users.noreply.github.com>
+Ali Alhulaimi <alialhulaimi2005@gmail.com> SciFabLab ICTP <scifablab@ollama.local>
+
+# Collaborator on the Solidify frontend, committed under two identities.
+Ajlan AlAjlan <157914196+AjlanAlajlan70@users.noreply.github.com> <444101482@student.ksu.edu.sa>
+Ajlan AlAjlan <157914196+AjlanAlajlan70@users.noreply.github.com> AjlanAjlan70 <444101482@student.ksu.edu.sa>
+
+# Upstream Apple Silicon port contributors.
+Xiang Li <xiang.l@alibaba-inc.com> <xiang@xianglis-MacBook-Pro.local>
+Xiang Li <xiang.l@alibaba-inc.com> xiangli <xiang@xianglis-MacBook-Pro.local>

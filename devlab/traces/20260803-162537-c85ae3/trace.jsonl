@@ -1,0 +1,2 @@
+{"seq": 0, "t": 1785767137.777262, "type": "session_start", "payload": {"image": "image.jpeg", "pipeline_type": "512", "steps": null, "seed": 42, "target_faces": 1000000, "model_id": "microsoft/TRELLIS.2-4B", "num_branches": 1, "vanilla_too": false, "pid": 79053}}
+{"seq": 1, "t": 1785767138.3236532, "type": "stage", "payload": {"name": "load_pipeline", "model_id": "microsoft/TRELLIS.2-4B"}}
