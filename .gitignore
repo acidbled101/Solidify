@@ -1,9 +1,12 @@
-.venv/
+# NOTE the patterns below have no trailing slash. `.venv/` matches a DIRECTORY
+# only, so a symlink of the same name slips straight past it -- which is
+# exactly how four machine-local symlinks once got committed and pushed.
+.venv
 __pycache__/
 *.pyc
 *.egg-info/
-TRELLIS.2/
-stubs/
+TRELLIS.2
+stubs
 *.obj
 *.glb
 *.gltf
@@ -12,7 +15,7 @@ stubs/
 .DS_Store
 progress-assets/
 PROGRESS.md
-deps/
+deps
 model_output/
 jobs/
 output_3d*.png
