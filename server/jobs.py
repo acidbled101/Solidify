@@ -66,6 +66,11 @@ class Job:
     # Basenames of coarse meshes decoded mid-generation, oldest first. These are
     # also the allowlist for serving them (see get_job_file).
     previews: list = field(default_factory=list)
+    # Human-readable narration of the repair ladder, streamed while print-prep
+    # runs rather than handed over at the end. Each entry says which method is
+    # being tried, why the previous one was abandoned, and what it costs in
+    # quality -- see printable_v2's "[rung N/5]" notes.
+    repair_log: list = field(default_factory=list)
 
     def status_text(self) -> str:
         return STATUS_TEXT.get(self.status, str(self.status))
@@ -96,6 +101,7 @@ class Job:
             "timings": self.timings,
             "progress": self.progress,
             "previews": list(self.previews),
+            "repair_log": list(self.repair_log),
             "params": self.params,
             "result": self.result,
             "diagnostics": self.diagnostics,

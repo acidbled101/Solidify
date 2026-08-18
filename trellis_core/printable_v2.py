@@ -359,7 +359,10 @@ def _manifold_with_repair(vertices, faces, opts, notes):
     if man is not None:
         return man, vertices, faces
 
-    msg = f"not a manifold ({why}); running PyMeshLab repair"
+    msg = (f"[rung 2/5] Manifold3D rejected the mesh ({why}); repairing non-manifold "
+           f"edges and vertices with PyMeshLab and closing holes up to "
+           f"{opts.close_hole_size} edges. Quality: unchanged -- the model keeps its "
+           f"own triangles.")
     print(f"  {msg}...")
     notes.append(msg)
     v, f = repair_for_manifold(vertices, faces, opts, notes)
@@ -367,6 +370,11 @@ def _manifold_with_repair(vertices, faces, opts, notes):
     if man is not None:
         return man, v, f
 
+    msg = (f"[rung 3/5] still rejected ({why}); fan-patching the small open boundary "
+           f"loops PyMeshLab declined -- it refuses any hole touching a non-manifold "
+           f"vertex. Quality: unchanged, this only adds triangles across holes.")
+    print(f"  {msg}...")
+    notes.append(msg)
     v, f = close_boundary_loops(v, f, notes)
     man, why = _try_manifold(v, f)
     return man, v, f
@@ -403,12 +411,16 @@ def to_manifold(vertices, faces, opts, notes):
         # causes. The SDF handles open holes on its own. Measured on the Benchy:
         # feeding it the repaired mesh put 2.2% of the surface >2 voxels
         # off-target; feeding it the original puts 0.0% there.
-        msg = "repairs did not produce a manifold; rebuilding through MeshLib's SDF"
+        msg = ("[rung 4/5] the mesh could not be closed while keeping its own triangles; "
+               "rebuilding it through MeshLib's signed distance field. Quality: the "
+               "surface is resampled from here on, so the finest detail is lost")
         print(f"  {msg}...")
         notes.append(msg)
         v, f = meshlib_repair.rebuild(vertices, faces, pitch, notes)
     else:
-        msg = "repairs did not produce a manifold; falling back to v1 voxel remesh"
+        msg = ("[rung 4/5] the mesh could not be closed while keeping its own triangles; "
+               "falling back to the v1 voxel remesh. Quality: the surface is resampled "
+               "onto a grid and UVs are discarded")
         print(f"  {msg}...")
         print("  Warning: this discards original topology/UVs, exactly like the v1 pipeline.")
         notes.append(msg)
@@ -452,8 +464,10 @@ def to_manifold(vertices, faces, opts, notes):
     # surface, which is why it is last and not first -- but a coarser model
     # beats a failed job.
     if opts.repair_backend == "meshlib":
-        msg = ("SDF rebuild was still open; falling back to the v1 voxel remesh "
-               "(guaranteed closed, but resamples the surface)")
+        msg = ("[rung 5/5] the SDF rebuild came back manifold but still OPEN, which "
+               "Manifold3D will not accept; falling back to the binary voxel remesh, "
+               "which cannot produce an open surface. Quality: coarsest path -- the "
+               "model is rebuilt from a voxel grid, so fine detail and UVs are gone")
         print(f"  {msg}...")
         notes.append(msg)
         remeshed, _used = repair_watertight(tm, pitch, force_solid=True)
@@ -730,6 +744,7 @@ def run_make_printable_v2(
     bake_colors: bool = True,
     repair_backend: str = "pymeshlab",
     min_fragment_ratio: float = 0.005,
+    notes: Optional[list] = None,
 ) -> PrintableV2Result:
     """v2 counterpart of printable.run_make_printable -- same inputs/outputs.
 
@@ -744,7 +759,9 @@ def run_make_printable_v2(
     """
     t_start = time.time()
     stages = {}
-    notes = []
+    # The caller may pass a list-like whose append() streams somewhere -- that is
+    # how the web UI narrates the repair ladder while it is still climbing it.
+    notes = [] if notes is None else notes
 
     if repair_backend == "meshlib" and not meshlib_repair.available():
         msg = "repair_backend='meshlib' requested but the meshlib SDK is not installed; using pymeshlab"

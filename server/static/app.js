@@ -29,6 +29,7 @@
     printablePipeline: "v3", advOpen: false,
     modelVariant: "tuned", adapterAvailable: true,
     previewName: "", formingSrc: null, progDetail: "",
+    jobProgress: null, repairSeen: 0, repairMax: 0,
     prog: 0, stageIdx: -1, log: [], queuePos: 0, busyReason: "", errMsg: "", errHint: "", dragOver: false,
     jobId: "",
     infoRows: null, diagRows: null, previewSrc: null, previewPath: null, libDraft: null,
@@ -713,7 +714,7 @@
         '</div>' +
       '</div>' +
       '<div id="stage-row" style="display:flex;flex-wrap:wrap;gap:10px">' + stageChips(v) + '</div>' +
-      '<div style="height:10px;border:1px solid rgba(53,242,226,.35);overflow:hidden;background:rgba(4,28,26,.6)"><div id="bar-fill" style="' + v.barFill + '"></div></div>' +
+      '<div id="phase-bars" style="display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(220px,1fr))">' + phaseBarsHTML() + '</div>' +
       '<div style="display:flex;flex-wrap:wrap;gap:28px;align-items:stretch">' +
         '<div data-lenis-prevent style="position:relative;flex:1 1 380px;min-height:320px;border:1px solid rgba(53,242,226,.22);background:radial-gradient(circle at 50% 45%, rgba(20,217,201,.09), transparent 65%)">' +
           '<model-preview data-mp mode="' + (state.formingSrc ? 'orbit' : 'forming') + '" progress="' + v.progInt + '" autorotate="true"' + (state.formingSrc ? ' src="' + state.formingSrc + '"' : '') + ' style="width:100%;height:100%;min-height:320px"></model-preview>' +
@@ -727,6 +728,62 @@
       '</div>' +
     '</div>';
   }
+  // Three phases the user can actually name, each with its own bar. The old
+  // single bar averaged them into one number that meant nothing: the voxel
+  // structure and the SLat refinement are different models doing different
+  // work, and repair is a different program entirely.
+  var PHASES = [
+    { key: "structure", label: "SHAPE VOXEL FLOW", sub: "sparse structure" },
+    { key: "shape",     label: "SLAT FLOW",        sub: "latent refinement" },
+    { key: "repair",    label: "REPAIR",           sub: "sealing the mesh" },
+  ];
+
+  // Which phases are finished, running, or not started yet. Derived from the
+  // job's own reported stage rather than elapsed time, so a phase only fills
+  // when the model says it did.
+  function phaseState() {
+    var p = state.jobProgress || null;
+    var cur = p && p.stage ? p.stage : null;
+    var order = ["structure", "shape", "repair"];
+    var curIdx = cur ? order.indexOf(cur) : -1;
+    // making_printable without a rung note yet still means repair has begun.
+    if (curIdx < 0 && state.stageIdx === 3) curIdx = 2;
+    return PHASES.map(function (ph, i) {
+      var pct = 0, active = false;
+      if (curIdx > i) pct = 100;
+      else if (curIdx === i) {
+        active = true;
+        pct = p && typeof p.step === "number" && p.total
+          ? Math.round(100 * p.step / p.total) : 0;
+        // Repair's rungs count attempts, not completion: sitting on rung 1 of 5
+        // is 0% done, not 20%.
+        if (ph.key === "repair" && p && p.total) {
+          var rung = Math.max(state.repairMax || 0, p.step);
+          pct = Math.round(100 * (rung - 1) / p.total);
+        }
+      }
+      return { ph: ph, pct: Math.max(0, Math.min(100, pct)), active: active, done: curIdx > i };
+    });
+  }
+
+  function phaseBarsHTML() {
+    return phaseState().map(function (st) {
+      var col = st.done ? "#6BFF2E" : (st.active ? "#35F2E2" : "#2b4d48");
+      var lblCol = st.done || st.active ? col : "#3f7a73";
+      var fill = st.active
+        ? "height:100%;width:" + st.pct + "%;background:repeating-linear-gradient(45deg,#35F2E2 0 10px,#14D9C9 10px 20px);animation:stripes .7s linear infinite;transition:width .25s linear"
+        : "height:100%;width:" + st.pct + "%;background:" + col + ";transition:width .25s linear";
+      return '<div style="display:flex;flex-direction:column;gap:6px">' +
+        '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">' +
+          '<span style="font-family:\'IBM Plex Mono\',monospace;font-size:10px;letter-spacing:.2em;color:' + lblCol + '">' + (st.done ? "\u2713 " : "") + st.ph.label + '</span>' +
+          '<span style="font-family:\'IBM Plex Mono\',monospace;font-size:10px;color:#3f7a73">' + st.pct + '%</span>' +
+        '</div>' +
+        '<div style="height:8px;border:1px solid rgba(53,242,226,.3);overflow:hidden;background:rgba(4,28,26,.6)"><div style="' + fill + '"></div></div>' +
+        '<span style="font-family:\'IBM Plex Mono\',monospace;font-size:9.5px;letter-spacing:.1em;color:#3f7a73">' + st.ph.sub + '</span>' +
+      '</div>';
+    }).join("");
+  }
+
   function stageChips(v) {
     return v.stages.map(function (st) { return '<div style="' + st.chip + '">' + st.label + '</div>'; }).join("");
   }
@@ -785,6 +842,7 @@
     var pd = appEl.querySelector("#prog-detail"); if (pd) pd.textContent = state.progDetail;
     var bf = appEl.querySelector("#bar-fill"); if (bf) bf.style.width = state.prog + "%";
     var sr = appEl.querySelector("#stage-row"); if (sr) sr.innerHTML = stageChips(v);
+    var pb = appEl.querySelector("#phase-bars"); if (pb) pb.innerHTML = phaseBarsHTML();
     var lf = appEl.querySelector("#log-feed"); if (lf) lf.innerHTML = logLinesHTML();
     var mp = appEl.querySelector("[data-mp]"); if (mp) mp.setAttribute("progress", v.progInt);
     patchElapsed();
@@ -830,6 +888,7 @@
     Object.assign(state, {
       log: [], prog: 0, stageIdx: -1, errMsg: "", errHint: "", busyReason: "", jobId: "",
       previewName: "", formingSrc: null, progDetail: "",
+      jobProgress: null, repairSeen: 0, repairMax: 0,
       previewSrc: null, previewPath: null, libDraft: null,
       dlSTL: null, dlSTLName: "", dlGLB: null, dlGLBName: "",
       jobElapsed: null, _elapsedAnchor: 0,
@@ -864,6 +923,7 @@
     if (!state.photoFile) return;
     state.log = []; state.prog = 0; state.stageIdx = -1; state.errMsg = ""; state.errHint = "";
     state.previewName = ""; state.formingSrc = null; state.progDetail = "";
+    state.jobProgress = null; state.repairSeen = 0; state.repairMax = 0;
     var fd = new FormData();
     fd.append("image", state.photoFile);
     if (state.seed !== "") fd.append("seed", state.seed);
@@ -1046,9 +1106,17 @@
     if (!state.jobId) state.jobId = shortId(id);
     if (idx !== state.stageIdx) pushLog(stageLog(st));
     state.stageIdx = idx;
+    state.jobProgress = job.progress || null;
+    // The ladder re-tries rungs 2-3 on the rebuilt mesh after rung 4, so the
+    // raw rung number goes 4 -> 2 -> 5. Track the furthest rung reached instead,
+    // or the repair bar visibly runs backwards.
+    if (job.progress && job.progress.stage === "repair" && job.progress.step) {
+      state.repairMax = Math.max(state.repairMax, job.progress.step);
+    }
     state.prog = progFor(idx, job.elapsed_seconds || 0, job.progress);
     state.progDetail = progDetail(job.progress);
     adoptPreview(id, job);
+    adoptRepairLog(job);
     // Anchor the live timer to the server's authoritative elapsed each poll.
     state.jobElapsed = job.elapsed_seconds || 0;
     state._elapsedAnchor = nowMs();
@@ -1099,6 +1167,28 @@
     }).catch(function () { /* a preview is optional; never surface a failure */ });
   }
   function pushLog(line) { state.log = state.log.concat([line]).slice(-7); }
+
+  // Repair narration. Only NEW notes are pushed, so polling every second does
+  // not reprint the whole ladder each tick. Escalation notes are split into the
+  // method being tried and the quality consequence, because those are two
+  // different things the user cares about and one line buries the second.
+  function adoptRepairLog(job) {
+    var lg = job.repair_log || [];
+    if (lg.length <= state.repairSeen) return;
+    lg.slice(state.repairSeen).forEach(function (raw) {
+      var m = /^\[rung (\d+)\/(\d+)\]\s*([\s\S]*)$/.exec(String(raw));
+      if (m) {
+        var body = m[3];
+        var cut = body.search(/Quality:/i);
+        var what = (cut > 0 ? body.slice(0, cut) : body).trim().replace(/[;.]\s*$/, "");
+        pushLog("> repair " + m[1] + "/" + m[2] + " \u00b7 " + what);
+        if (cut > 0) pushLog("   \u21b3 " + body.slice(cut).trim());
+      } else {
+        pushLog("   " + String(raw).trim());
+      }
+    });
+    state.repairSeen = lg.length;
+  }
 
   function buildSuccess(id, job) {
     var result = job.result || {}; var files = result.files || []; var base = "/api/jobs/" + id + "/files/";

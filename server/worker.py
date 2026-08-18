@@ -17,6 +17,7 @@ model-load cost is paid at most once for the whole server lifetime.
 import trellis_core  # noqa: F401,E402  (must be first trellis-related import)
 
 import logging
+import re
 # Module level, deliberately. This used to be imported inside _run_job, which
 # made `os` a LOCAL of that function -- so the preview callbacks defined above
 # it closed over an unbound name and raised NameError the moment they ran,
@@ -141,7 +142,35 @@ def _set_variant(pipeline, variant: str) -> str:
     return variant
 
 
-def _run_printable(pipeline: str, *, glb_path: str, output_prefix: str):
+class LiveNotes(list):
+    """A notes list that reports each entry the moment it is appended.
+
+    print-prep already narrates itself into a `notes` list, but only handed it
+    over once the whole stage had finished -- so the repair ladder climbed in
+    silence and the UI could say nothing more useful than "finalizing".
+    Subclassing list keeps every existing `notes.append(...)` call site working
+    untouched.
+    """
+
+    def __init__(self, on_note):
+        super().__init__()
+        self._on_note = on_note
+
+    def append(self, item):
+        super().append(item)
+        try:
+            self._on_note(item)
+        except Exception:
+            log.debug("note callback failed", exc_info=True)
+
+
+# Escalation notes are tagged "[rung N/5]" by printable_v2 so the UI can show
+# which repair is being attempted without parsing prose. Rung 1 (accept the mesh
+# as-is) emits nothing, because the common case is that it simply works.
+_RUNG_RE = re.compile(r"^\[rung (\d+)/(\d+)\]\s*(.*)", re.S)
+
+
+def _run_printable(pipeline: str, *, glb_path: str, output_prefix: str, notes=None):
     """Run the requested print-prep pipeline; degrade to v1 rather than fail.
 
     v2/v3 need optional extras (pymeshlab, manifold3d, meshlib). If they are not
@@ -161,6 +190,7 @@ def _run_printable(pipeline: str, *, glb_path: str, output_prefix: str):
                 overhang_angle=config.PRINTABLE_OVERHANG_ANGLE,
                 solid_infill=config.PRINTABLE_SOLID_INFILL,
                 repair_backend="meshlib" if pipeline == "v3" else "pymeshlab",
+                notes=notes,
             )
         except ImportError as e:
             log.warning(
@@ -318,12 +348,37 @@ def _run_job(store: JobStore, job_id: str) -> None:
     diagnostics = None
     fidelity = None
     if not params.get("skip_printable"):
-        store.update(job_id, status=JobStatus.MAKING_PRINTABLE)
+        store.update(job_id, status=JobStatus.MAKING_PRINTABLE, repair_log=[],
+                     progress={"stage": "repair", "step": 1, "total": 5, "overall": 0.0,
+                               "detail": "Checking whether the mesh is already a valid solid"})
         t0 = time.time()
+
+        def on_note(text):
+            """Narrate the repair ladder as it climbs.
+
+            Escalation notes carry a "[rung N/5]" tag; everything else is
+            progress chatter from inside a rung. Both go to the feed, but only a
+            tagged note advances the bar -- otherwise a chatty rung would look
+            like progress it has not made.
+            """
+            job_now = store.get(job_id)
+            fields = {"repair_log": (list(job_now.repair_log) + [text])[-40:]}
+            m = _RUNG_RE.match(text)
+            if m:
+                rung, total = int(m.group(1)), int(m.group(2))
+                fields["progress"] = {
+                    "stage": "repair", "step": rung, "total": total,
+                    "overall": (rung - 1) / total, "detail": m.group(3),
+                }
+                log.info("Job %s repair rung %d/%d", job_id, rung, total)
+            store.update(job_id, **fields)
+
+        repair_notes = LiveNotes(on_note)
         printable = _run_printable(
             params.get("printable_pipeline") or config.PRINTABLE_PIPELINE,
             glb_path=glb_path,
             output_prefix=f"{output_dir}/model_printable",
+            notes=repair_notes,
         )
         _record_timing(store, job_id, "make_printable", time.time() - t0)
         diagnostics = printable.diagnostics
@@ -388,6 +443,51 @@ def _record_timing(store: JobStore, job_id: str, key: str, seconds: float) -> No
     store.update(job_id, timings=timings)
 
 
+def _failure_hint(store: JobStore, job_id: str, exc: Exception) -> str:
+    """Explain a failure using what the repair ladder actually recorded.
+
+    The one failure this pipeline produces in practice is a mesh no repair could
+    close, and by then the ladder has already written down every method it tried
+    and why each was abandoned. Replaying that is far more use than a generic
+    apology -- and it tells the user the one thing they can act on: this input
+    generated geometry too broken to seal, so try another photo or angle.
+    """
+    generic = "An unexpected error occurred while processing this job."
+    try:
+        job = store.get(job_id)
+    except Exception:
+        return generic
+
+    # Keep each note's OWN rung number. Renumbering them sequentially would
+    # relabel "rung 5 of 5" as step 3 and quietly misreport how far the ladder
+    # actually got -- which is the single most useful fact in this message.
+    steps = []
+    for note in job.repair_log:
+        m = _RUNG_RE.match(note)
+        if m:
+            steps.append((int(m.group(1)), int(m.group(2)), m.group(3).strip()))
+
+    if "Manifold3D rejected" in str(exc) or steps:
+        lines = [
+            "The mesh could not be turned into a closed, printable solid.",
+            "",
+            "Every repair in the pipeline was tried, in order:",
+        ]
+        lines += [f"  {r}/{t}  {text}" for r, t, text in steps] or \
+                 ["  (the ladder recorded no escalation)"]
+        lines += [
+            "",
+            "This normally means the generated geometry was unusually broken -- "
+            "thin or hollow shapes are the common cause. A different photo, or a "
+            "less side-on angle, usually generates a mesh that seals cleanly.",
+            "",
+            "The raw (unrepaired) geometry was still produced and can be "
+            "downloaded, but it is not watertight and will not slice as-is.",
+        ]
+        return "\n".join(lines)
+    return generic
+
+
 def worker_loop(store: JobStore) -> None:
     """Forever pull job ids and run them. A crash in one job is caught here so
     that the worker thread itself never dies -- the next queued job still runs.
@@ -408,7 +508,11 @@ def worker_loop(store: JobStore) -> None:
                     error={
                         "type": "exception",
                         "message": f"{type(e).__name__}: {e}",
-                        "hint": "An unexpected error occurred while processing this job.",
+                        # "An unexpected error occurred" tells the user nothing they
+                        # can act on. When print-prep is what failed, the repair log
+                        # holds the actual story -- which repairs were tried, why each
+                        # was abandoned -- so hand that over instead of a shrug.
+                        "hint": _failure_hint(store, job_id, e),
                         "traceback": traceback.format_exc(),
                     },
                 )
