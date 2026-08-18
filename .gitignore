@@ -74,3 +74,11 @@ data/thingi10k_sft/*
 # other people's models sidesteps their per-object licences entirely.
 !data/thingi10k_sft/manifest.jsonl
 !data/thingi10k_sft/ATTRIBUTION.md
+
+# Presentation mesh downloads: the raw/v1/v3 comparison meshes shown in the
+# ICTP deck, carved out of the global *.glb / *.stl ignore so they ship with
+# the repo. The raw mesh is a GLB (37MB) rather than an STL because its STL is
+# 103MB, over GitHub's 100MB per-file hard limit; the GLB is lossless and
+# GitHub renders it in 3D in-browser.
+!presentation/assets/*.glb
+!presentation/assets/*.stl
