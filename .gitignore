@@ -56,14 +56,18 @@ devlab/traces/*/
 # training run artifacts (metrics, checkpoints, samples)
 runs/
 
-# built datasets (latents, conditioning images, embeddings)
-data/
+# built datasets (latents, conditioning images, embeddings).
+# `data/*` rather than `data/`: git cannot re-include anything beneath an
+# EXCLUDED DIRECTORY, so ignoring the directory itself would make the
+# un-ignore rules below dead letters.
+data/*
+!data/thingi10k_sft/
+data/thingi10k_sft/*
 
 # The SFT dataset itself is ignored above (data/), but its manifest is the
 # index that DEFINES it: 300 records pinning each object by Thingi10K file_id,
 # with its licence and token count. dataset_build.py is seeded, so the manifest
 # plus one command reproduces the corpus -- and shipping an index rather than
 # other people's models sidesteps their per-object licences entirely.
-!data/thingi10k_sft/
 !data/thingi10k_sft/manifest.jsonl
 !data/thingi10k_sft/ATTRIBUTION.md
