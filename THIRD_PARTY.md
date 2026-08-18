@@ -1,4 +1,4 @@
-# What in this repository is not mine
+# What in Solidify is not mine
 
 Everything outside `third_party/` is my own work. This page exists so you do
 not have to take that on faith.
@@ -53,14 +53,14 @@ libraries it depends on (`mtlgemm`, `mtldiffrast`, `mtlbvh`, `mtlmesh`) are by
 [@pedronaugusto](https://github.com/pedronaugusto) and are installed by
 `setup.sh`, not vendored here.
 
-**This project.** Everything else.
+**Solidify.** Everything else.
 
 ## Other third-party content
 
 | what | where | licence |
 |---|---|---|
 | three.js, GLTFLoader, OrbitControls, BufferGeometryUtils | `experiments/dpo_inference_steering/inspector/static/vendor/` | MIT |
-| The "Solidify" frontend visual design | `server/static/` | by Ajlan AlAjlan, 4 commits |
+| Frontend visual design (the sci-fi treatment) | `server/static/` | by Ajlan AlAjlan, 4 commits |
 | Example shoe renders (upstream's) | `third_party/assets/` | Shivam Kumar |
 | Thingi10K source models | not vendored — see `data/thingi10k_sft/ATTRIBUTION.md` | per-object, mixed CC |
 | DINOv3 | downloaded at setup | Meta custom licence (gated) |
@@ -74,6 +74,6 @@ identities I committed under across three machines:
 ```
     52  Ali Alhulaimi
     21  Shivam Kumar      (the Apple Silicon port, Apr 2026)
-     4  Ajlan AlAjlan     (Solidify frontend design)
+     4  Ajlan AlAjlan     (frontend visual design)
      3  Xiang Li          (setup dependency pre-cloning)
 ```

@@ -1,12 +1,18 @@
-# Photo to printable object
+# Solidify
 
-Point a camera at something, get a mesh a 3D printer will actually accept.
+**Photo in, printable object out.**
 
-This is the image-to-3D system running at the [ICTP SciFabLab](https://www.ictp.it/scifablab).
-A visitor uploads a photo; a few minutes later they have a watertight STL. It
-runs on a Mac in the corner of the lab, on a version of the generative model I
-fine-tuned to produce cleaner geometry, behind a repair pipeline that reports
-what it is doing and why.
+Point a camera at something and get a mesh a 3D printer will actually accept.
+
+Solidify is the image-to-3D system running at the
+[ICTP SciFabLab](https://www.ictp.it/scifablab). A visitor uploads a photo; a
+few minutes later they have a watertight STL. It runs on a Mac in the corner of
+the lab, on a version of the generative model I fine-tuned to produce cleaner
+geometry, behind a repair pipeline that reports what it is doing and why.
+
+The name is what the pipeline does: *solidify* is the step that takes a hollow,
+broken shell and floods its interior until it is a closed solid. It started as
+a function name and ended up as the name of the whole thing.
 
 It is built on Microsoft's TRELLIS.2 and on an Apple Silicon port of it. What
 came from where is set out in [THIRD_PARTY.md](THIRD_PARTY.md), and verifiable
@@ -83,8 +89,8 @@ Requirements, all of them hard:
   surfaces deep inside a pipeline load and looks like a bug.
 
 ```bash
-git clone https://github.com/acidbled101/trellis-mac.git
-cd trellis-mac
+git clone https://github.com/acidbled101/Solidify.git
+cd Solidify
 
 xcodebuild -downloadComponent MetalToolchain   # optional; faster texture bake
 hf auth login                                  # after approving both models above

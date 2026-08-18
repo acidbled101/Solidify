@@ -1,7 +1,7 @@
 # Evaluation
 
 Measurement harnesses. Nothing here runs in production; everything here is how
-the claims elsewhere in this repository were checked.
+Solidify's claims were checked.
 
 | file | what it measures |
 |---|---|

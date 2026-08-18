@@ -1,4 +1,4 @@
-# Fine-tuning the shape-SLat flow model
+# Training — fine-tuning the model behind Solidify
 
 How the model that ships in `adapters/` was made, and how to remake it.
 

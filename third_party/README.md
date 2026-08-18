@@ -3,9 +3,9 @@
 **This is not my work.** What follows is the original README of
 [shivampkumar/trellis-mac](https://github.com/shivampkumar/trellis-mac) by
 **Shivam Kumar**, preserved verbatim as it stood at commit `d58628f`
-(2026-04-28), the point this project forked from. It documents the CUDA→Metal
+(2026-04-28), the point Solidify forked from. It documents the CUDA→Metal
 port that lives in `third_party/backends/` and `third_party/patches/` — the
-layer my own work is built on.
+layer Solidify is built on.
 
 It is kept here rather than deleted because it is good documentation of a hard
 piece of engineering, and because the benchmark numbers and the notes on
