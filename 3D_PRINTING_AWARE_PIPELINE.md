@@ -8,7 +8,7 @@
 
 ## Two hardware tracks
 
-This repo (`trellis-mac`) runs TRELLIS.2 on Apple Silicon via PyTorch MPS — there
+Solidify runs TRELLIS.2 on Apple Silicon via PyTorch MPS — there
 is no CUDA path here (see [README.md](README.md)). The original version of this
 plan assumed a CUDA workstation (≥24GB dedicated VRAM, `flash_attn`, PyMeshLab,
 Manifold3D). Since the hardware on hand right now is a Mac, this document is

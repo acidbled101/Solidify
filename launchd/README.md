@@ -8,6 +8,12 @@ Both hardcode `/Users/scifablab/...` paths — launchd does no variable expansio
 in `ProgramArguments`, so a different user or checkout location means editing
 these files.
 
+Note those paths still say `trellis-mac`: that is the **directory on disk**,
+not the project. Renaming the GitHub repository to Solidify deliberately did
+not rename the local checkout, because the venv, these plists and the running
+server all resolve through it. Rename the directory only if you are prepared to
+update all three.
+
 ## Install
 
 ```sh

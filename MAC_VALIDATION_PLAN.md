@@ -20,7 +20,7 @@ If this step fails, nothing below it is worth trying yet — fix the
 environment first.
 
 ```bash
-cd trellis-mac
+cd Solidify
 git checkout physics-aware-pipeline
 git pull                      # if you pushed from elsewhere, or:
 git log --oneline -5          # confirm you see the DPO commits

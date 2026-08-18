@@ -62,8 +62,8 @@ free disk for weights, and a HuggingFace account with access to the gated models
 
 - [ ] **Get the code and switch to this branch:**
   ```bash
-  git clone https://github.com/acidbled101/trellis-mac.git
-  cd trellis-mac
+  git clone https://github.com/acidbled101/Solidify.git
+  cd Solidify
   git checkout web-app-fastapi
   # (If the repo already exists on this Mac: cd into it, then
   #  git checkout web-app-fastapi && git pull)
