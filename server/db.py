@@ -269,6 +269,23 @@ def list_models(limit: int = 200) -> list[dict]:
     return out
 
 
+def get_model(job_id: str) -> Optional[dict]:
+    """One archived model by job id, or None.
+
+    The Library outlives the process; JobStore does not. Serving a file for an
+    old job needs this to find out the job was ever real.
+    """
+    with _connect() as conn:
+        r = conn.execute("SELECT * FROM models WHERE job_id = ?", (job_id,)).fetchone()
+    if r is None:
+        return None
+    d = dict(r)
+    d["params"] = json.loads(d["params"]) if d.get("params") else {}
+    d["files"] = json.loads(d["files"]) if d.get("files") else []
+    d["watertight"] = None if d["watertight"] is None else bool(d["watertight"])
+    return d
+
+
 def avg_job_seconds(window: int = 20) -> Optional[float]:
     """Average duration of the most recent completed jobs, or None if no data."""
     with _connect() as conn:

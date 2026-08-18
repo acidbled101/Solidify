@@ -24,13 +24,12 @@ dependencies = [
     "fastapi",
     "uvicorn[standard]",
     "python-multipart",
-]
-
-[project.optional-dependencies]
-# v2 print-prep pipeline (trellis_core/printable_v2.py + compare_printable.py).
-# Not required by the default v1 pipeline, so it stays out of the base install:
-#   pip install -e ".[postproc-v2]"
-postproc-v2 = [
+    # The print-prep repair stack (trellis_core/printprep/). These were an
+    # optional "postproc-v2" extra back when print-prep defaulted to v1, which
+    # does not use them. server/config.py has defaulted to v3 since 2026-07-29,
+    # and printable_v2.py imports pymeshlab and manifold3d inside functions --
+    # so as an extra they did not fail at install time or at startup, they
+    # failed several minutes into a user's first job.
     "pymeshlab",
     "manifold3d",
     "meshlib",

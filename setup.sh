@@ -72,7 +72,12 @@ source .venv/bin/activate
 
 # Install dependencies
 echo "Installing dependencies..."
-DEPS="torch torchvision torchaudio transformers accelerate huggingface_hub safetensors pillow numpy trimesh scipy tqdm easydict kornia timm imageio opencv-python-headless xatlas fast-simplification scikit-image rtree fastapi uvicorn[standard] python-multipart"
+# pymeshlab/manifold3d/meshlib are the print-prep repair stack. They used to
+# be optional because print-prep defaulted to v1, which does not need them.
+# The default is v3 now (server/config.py), and printable_v2.py imports
+# pymeshlab and manifold3d inside functions -- so leaving them out did not
+# fail at startup, it failed several minutes into a user's first job.
+DEPS="torch torchvision torchaudio transformers accelerate huggingface_hub safetensors pillow numpy trimesh scipy tqdm easydict kornia timm imageio opencv-python-headless xatlas fast-simplification scikit-image rtree fastapi uvicorn[standard] python-multipart pymeshlab manifold3d meshlib"
 if command -v uv &>/dev/null; then
     PIP="uv pip install"
 else

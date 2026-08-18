@@ -320,25 +320,45 @@ async def get_job(job_id: str):
 
 @app.get("/api/jobs/{job_id}/files/{filename}")
 async def get_job_file(job_id: str, filename: str):
+    # Two stores disagree about what exists. JobStore is in memory and holds
+    # only jobs created since the last restart; the Library is SQLite and
+    # outlives the process. Serving downloads from JobStore alone meant every
+    # model in the Library became a 404 the moment the server restarted, even
+    # though its files were sitting on disk the whole time.
     try:
         job = store.get(job_id)
     except KeyError:
-        return _error(404, "Unknown job id.")
+        job = None
 
-    # Build an allowlist of exact known basenames from the job's result. Never
-    # join a user-supplied filename onto a path without confirming it is one of
-    # these -- prevents path traversal.
-    known = set()
-    if job.result and job.result.get("files"):
-        known = {f["filename"] for f in job.result["files"]}
-    # In-flight previews are servable too, and they exist long before `result`
-    # does. They are recorded by the worker as basenames it wrote itself, so
-    # the allowlist property that prevents traversal still holds.
-    known.update(job.previews)
+    if job is not None:
+        output_dir = job.output_dir
+        # Allowlist of exact known basenames from the job's result. Never join a
+        # user-supplied filename onto a path without confirming it is one of
+        # these -- prevents path traversal.
+        known = set()
+        if job.result and job.result.get("files"):
+            known = {f["filename"] for f in job.result["files"]}
+        # In-flight previews are servable too, and they exist long before
+        # `result` does. They are recorded by the worker as basenames it wrote
+        # itself, so the allowlist property that prevents traversal still holds.
+        known.update(job.previews)
+    else:
+        archived = db.get_model(job_id)
+        if archived is None:
+            return _error(404, "Unknown job id.")
+        output_dir = str(config.JOBS_DIR / job_id / "output")
+        if not os.path.isdir(output_dir):
+            return _error(404, "This model's files are no longer on disk.")
+        # The allowlist here is the directory listing itself. os.listdir returns
+        # bare basenames, so a traversal attempt can never equal one of them --
+        # the same guarantee the in-memory path gets from its recorded names.
+        known = {n for n in os.listdir(output_dir)
+                 if os.path.isfile(os.path.join(output_dir, n))}
+
     if filename not in known:
         return _error(404, "Unknown file for this job.")
 
-    path = os.path.join(job.output_dir, filename)
+    path = os.path.join(output_dir, filename)
     if not os.path.exists(path):
         return _error(404, "File not found on disk.")
     return FileResponse(path, filename=filename)
