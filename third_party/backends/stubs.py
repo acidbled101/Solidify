@@ -78,7 +78,7 @@ class VoxelRenderer:
     def __init__(self, *args, **kwargs):
         raise RuntimeError("o_voxel.rasterize requires CUDA")
 ''')
-    # Note: o_voxel/convert.py is provided by third_party/backends/mesh_extract.py
+    # Note: o_voxel/convert.py is provided by backends/mesh_extract.py
     # and copied into place by the patch script.
 
 
