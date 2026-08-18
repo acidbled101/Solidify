@@ -2,7 +2,7 @@
 3D Geometric Judge -- physics-aware scoring function for ranking candidate
 meshes during inference-time preference optimization.
 
-See 3D_PRINTING_AWARE_PIPELINE.md, Section II, for the score definition:
+See experiments/dpo_inference_steering/DESIGN_NOTE.md, Section II, for the score definition:
 
     S = alpha * R_Detail - (beta * L_OH + gamma * L_Th + delta * L_Topo)
 

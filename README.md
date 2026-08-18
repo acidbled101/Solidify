@@ -176,6 +176,95 @@ by hand.
 
 ---
 
+## A worked example
+
+The toad at the top of this page, start to finish. Input is
+`server/static/assets/frog.png`, a single photo.
+
+### Generate
+
+```console
+$ python generate.py server/static/assets/frog.png --pipeline-type 512
+[SPARSE] Conv backend: none; Attention backend: sdpa
+pipeline loaded in 91s
+Sampling sparse structure: 100%|██████████| 12/12 [01:42<00:00,  8.51s/it]
+Sampling shape SLat:       100%|██████████| 12/12 [00:54<00:00,  4.52s/it]
+Sampling texture SLat:     100%|██████████| 12/12 [00:27<00:00,  2.32s/it]
+  Rasterizing 499,999 triangles into 1024x1024...
+  Final coverage: 100.0%, total bake: 10.3s
+DONE in 332s
+```
+
+Measured on an M4 Pro with `SPARSE_CONV_BACKEND=none` — the pure-PyTorch
+fallback, because `flex_gemm` was not installed on that machine. With the Metal
+stack the sparse-structure stage is several times faster; that stage is 102s of
+the 332s here. Pipeline load is a one-time cost per process, so batching images
+in one run pays it once.
+
+### Repair
+
+Feed the raw mesh to the ladder:
+
+```console
+$ python make_printable.py output_3d.glb
+Mesh: 647,653 vertices, 1,297,678 faces, watertight=False
+  Split: 7887 raw components -> kept 1 large object (removed 7886 noise/small)
+
+Repairing geometry...
+  --solid-infill requested; voxelizing to eliminate internal cavities...
+Repaired in 50.5s: 2,911,086 vertices, 5,834,576 faces, watertight=True
+  Voxel remesh inflated faces to 5,834,576; re-simplifying to ~1,000,000...
+
+Fidelity report (shape deviation from post-processing, vs. original):
+  Chamfer distance (avg deviation):     0.01417  (0.98% of model size)
+  Hausdorff distance (worst deviation): 0.16758  (11.58% of model size)
+
+Printability report (heuristic, not exhaustive):
+  Overhang area (> 45 deg from vertical): 15.1% of surface
+  Thin-wall warnings (< 1.0mm, sampled 500 rays): 498
+
+Saved: output_3d_printable.glb
+Saved: output_3d_printable.stl
+```
+
+Note what the fidelity report is for: the repair moved the surface by 0.98% of
+the model's size on average, and 11.58% at the single worst point. That is the
+price of `watertight=True`, and the tool reports it rather than hiding it.
+
+### Measure the topology
+
+Generate the same photo again with `--no-texture`, then:
+
+```console
+$ python -m evaluation.topology_test --mesh output_3d.glb
+  faces              1,165,658
+  open_rate              0.775%
+  nonmanifold_rate       0.430%
+  components             2,452
+```
+
+**That `--no-texture` is not optional if you care about the number.** The
+textured export of this same toad, from the same model and the same seed,
+reports **46.767% open edges and 68,376 components** — xatlas splits vertices
+along every UV seam, so connectivity is shredded while the shape is untouched.
+Every figure in this repository is measured on geometry-only output; see
+[`evaluation/README.md`](evaluation/README.md).
+
+### Compare against the untrained model
+
+```console
+$ python -m evaluation.compare_models \
+      --images server/static/assets/frog.png \
+      --models base sft-1200-20260806-0119@1050
+```
+
+Writes one raw mesh per model plus a topology table. It samples the sparse
+structure **once** and reuses it for every model, and seeds the SLat noise per
+photo, so the comparison is paired by construction — the only thing varying
+between the rows is the weights. That is how the numbers above were produced.
+
+---
+
 ## How it fits together
 
 ```
@@ -235,14 +324,34 @@ part. The weight-space fine-tune above is what replaced it.
 
 ---
 
+## Credits
+
+The frontend's visual design — the sci-fi treatment, the layout, the whole look
+of the app — is by **Ajlan AlAjlan**. Everything behind it is mine.
+
+Built on [TRELLIS.2](https://github.com/microsoft/TRELLIS.2) by Microsoft
+Research, and on [Shivam Kumar's Apple Silicon port](https://github.com/shivampkumar/trellis-mac)
+of it, which is preserved in [`third_party/`](third_party/) — see
+[THIRD_PARTY.md](THIRD_PARTY.md) for exactly what came from where.
+
 ## Licence
 
-MIT — see [LICENSE](LICENSE), which names both me and the author of the port
-this builds on. Model weights carry their own terms: TRELLIS.2 is MIT, DINOv3
-is under a Meta custom licence, and **RMBG-2.0 is CC BY-NC 4.0 — non-commercial
-use only** unless you license it from BRIA.
+Solidify's own code is MIT — see [LICENSE](LICENSE).
 
-Training data comes from Thingi10K under per-object Creative Commons licences,
-some non-commercial and some no-derivatives. See
-[`training/README.md`](training/README.md) before redistributing anything
-derived from it.
+**The models it runs are not, and two of them restrict what you may do with the
+output.** Full texts are in [`licenses/`](licenses/README.md):
+
+| model | licence | commercial use |
+|---|---|---|
+| TRELLIS.2-4B | MIT | yes |
+| DINOv3 | [Meta DINOv3 Licence](licenses/DINOv3-LICENSE.md) — custom, not open source | read the licence |
+| RMBG-2.0 | [CC BY-NC 4.0](licenses/CC-BY-NC-4.0.txt) | **no** — needs a licence from [BRIA](https://bria.ai/) |
+
+RMBG-2.0 is the binding constraint: it is non-commercial, it runs on every job,
+and there is no code path around it, since background removal happens before
+the model sees the image. A commercial deployment needs BRIA's permission
+regardless of this repository's MIT licence.
+
+Training data has its own terms again — 300 Thingi10K models under per-object
+Creative Commons licences, 11 No-Derivatives and 94 non-commercial. See
+[`data/thingi10k_sft/ATTRIBUTION.md`](data/thingi10k_sft/ATTRIBUTION.md).

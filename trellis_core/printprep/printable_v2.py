@@ -20,7 +20,7 @@ triangles and instead does:
 repair_backend="meshlib" swaps the repair strategy (not the stages): MeshLib's
 ray-parity orientation fix runs right after cleaning, and its SDF rebuild
 replaces v1's voxel remesh as the last resort. On real TRELLIS meshes that is
-the configuration that wins -- see POSTPROC_V2.md.
+the configuration that wins -- see trellis_core/printprep/README.md.
 
 The public entry point run_make_printable_v2() mirrors printable.run_make_printable
 (same arguments, same PrintableResult shape) so the two can be swapped in the

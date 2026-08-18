@@ -88,7 +88,12 @@ def mesh_topology(tm) -> Dict:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--run-id", required=True)
+    # Measuring ONE mesh is the thing most people want and there was no way to
+    # do it from the command line -- mesh_topology() was importable and nothing
+    # else. --mesh short-circuits the paired checkpoint test below.
+    ap.add_argument("--mesh", default=None,
+                    help="measure a single mesh file and exit (no model loading)")
+    ap.add_argument("--run-id", required=False)
     ap.add_argument("--runs-dir", default=os.path.join(REPO, "runs"))
     ap.add_argument("--data", default=os.path.join(REPO, "data", "thingi10k_sft"))
     ap.add_argument("--steps", default="0,750,900,1050")
@@ -103,6 +108,25 @@ def main(argv=None) -> int:
     ap.add_argument("--model-id", default="microsoft/TRELLIS.2-4B")
     ap.add_argument("--out", default=None)
     args = ap.parse_args(argv)
+
+    if args.mesh:
+        import trimesh
+        tm = trimesh.load(args.mesh, force="mesh")
+        t = mesh_topology(tm)
+        print(f"  faces              {t['faces']:>12,}")
+        print(f"  open_rate          {t['open_rate']*100:>11.3f}%")
+        print(f"  nonmanifold_rate   {t['nonmanifold_rate']*100:>11.3f}%")
+        print(f"  components         {t['components']:>12,}")
+        print(f"  watertight         {str(bool(t['watertight'])):>12}")
+        if tm.visual is not None and getattr(tm.visual, "uv", None) is not None:
+            print("\n  NOTE: this mesh carries UVs, so it has been through the texture\n"
+                  "  bake. xatlas splits vertices along every seam, which inflates\n"
+                  "  open_rate and components enormously. Re-generate with\n"
+                  "  --no-texture before trusting these numbers.")
+        return 0
+
+    if not args.run_id:
+        ap.error("--run-id is required unless --mesh is given")
 
     import trimesh
     from trellis2.modules import sparse as sp

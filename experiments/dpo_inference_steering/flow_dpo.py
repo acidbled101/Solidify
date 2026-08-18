@@ -449,7 +449,7 @@ def path_curvature(traj: torch.Tensor) -> torch.Tensor:
 
     Measured on this repo's own alignment run: raw kappa 9.45 -> 168.90
     (17.9x "worse") while tortuosity went 1.942 -> 1.615 (1.20x BETTER). The
-    two disagree in direction. The first draft of report/flow_dpo_theory.md
+    two disagree in direction. The first draft of experiments/dpo_inference_steering/THEORY.md
     reported the raw ratio as evidence that DPO fails to straighten paths;
     that conclusion was an artifact of this scaling.
     """

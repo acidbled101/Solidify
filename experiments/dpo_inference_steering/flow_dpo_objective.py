@@ -111,7 +111,7 @@ class FlowDPOConfig:
                      repo has already measured that exact failure -- reward
                      rising while L_Th degraded 7.4x, and all 3000 aligned
                      samples collapsing onto one geometry UNDER the
-                     reference-based objective (report/flow_dpo_theory.md
+                     reference-based objective (experiments/dpo_inference_steering/THEORY.md
                      2.3(b),(c)). The KL anchor did not prevent it because the
                      velocity-space surrogate contains no term penalising
                      distance from the reference. This term does.

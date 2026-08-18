@@ -91,7 +91,7 @@ SKIP_PRINTABLE_BY_DEFAULT = _as_bool(os.environ.get("TRELLIS_SKIP_PRINTABLE", "0
 
 # Which print-prep implementation runs. Measured on real job meshes, v3 beats v1
 # on every axis -- ~2x faster, 4-7x smaller files, 20x closer to the original
-# surface, and watertight where v1 was not (see POSTPROC_V2.md) -- so it is the
+# surface, and watertight where v1 was not (see trellis_core/printprep/README.md) -- so it is the
 # default. v1 stays selectable per job (and via TRELLIS_PRINTABLE_PIPELINE) as
 # the fallback: it needs only trimesh, while v2/v3 need the optional
 # pymeshlab/manifold3d/meshlib extras.

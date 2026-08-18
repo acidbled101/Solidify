@@ -515,7 +515,7 @@ def test_tortuosity_is_scale_free_and_curvature_is_not():
     path_curvature scales as (displacement)^2. Doubling the size of a path
     without changing its SHAPE must therefore quadruple raw curvature while
     leaving tortuosity untouched. If that invariance is ever lost, the
-    straightness claims in report/flow_dpo_theory.md become unsupported again.
+    straightness claims in experiments/dpo_inference_steering/THEORY.md become unsupported again.
     """
     t = torch.linspace(0, 1, 65).view(-1, 1, 1)
     bent = torch.cat([t, torch.sin(t * 3.14159) * 0.4], dim=2)

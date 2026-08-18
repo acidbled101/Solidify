@@ -1,8 +1,8 @@
 # Inference-time preference steering for TRELLIS.2 — experiment retrospective
 
 **Branch:** `physics-aware-pipeline` · **Period:** 2026-07-31 → 2026-08-05
-**Status:** concluded. The approach is being retired in favour of weight-space DPO
-training; see `flow_dpo_training_plan.md`.
+**Status:** concluded. The approach was retired in favour of the weight-space
+LoRA fine-tune that ships; see [`../../training/README.md`](../../training/README.md).
 
 This is the closing report for the DreamDPO-style inference-time steering
 experiment. It records what was built, how it was measured, what the
@@ -15,7 +15,7 @@ what we hoped.
 
 ## 1. The hypothesis
 
-From `3D_PRINTING_AWARE_PIPELINE.md` (2026-07-31): a single-stage latent flow
+From `experiments/dpo_inference_steering/DESIGN_NOTE.md` (2026-07-31): a single-stage latent flow
 model has a differentiable path from final geometry back to the generative
 latent, which multi-stage image→multiview→mesh pipelines do not. If so, we
 should be able to intercept the SLat sampling ODE mid-flight, fork two
@@ -139,7 +139,7 @@ branches from 10 completed runs):
 | verdict flipped by steering | 5/17 (rate 0.29) |
 | distinguishable from zero? | **no** |
 
-An earlier, stricter subset (6 runs / 10 forks, `flow_dpo_theory.md` §3) gave
+An earlier, stricter subset (6 runs / 10 forks, `THEORY.md` §3) gave
 −0.0049 ± 0.0115 with the *perturbation* gain positive at +0.0067, where the
 current pooled table has it at −0.025. **The two disagree on the sign of the
 perturbation term.** That disagreement is itself a finding: at n≈17, filter

@@ -33,7 +33,7 @@ Everything from here down is Track A unless marked otherwise.
 ## Relationship to the existing print-prep pipeline
 
 This repo already has a **non-differentiable, heuristic** print-prep pipeline in
-[trellis_core/printable.py](trellis_core/printable.py) (used by
+[trellis_core/printable.py](../../trellis_core/printprep/printable.py) (used by
 `make_printable.py` and the web server):
 
 - `diagnostics()` — overhang % (face-normal vs. a critical angle) and thin-wall

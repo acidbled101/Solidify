@@ -1,5 +1,5 @@
 """
-Phase 4 of 3D_PRINTING_AWARE_PIPELINE.md: end-to-end generation through the
+Phase 4 of experiments/dpo_inference_steering/DESIGN_NOTE.md: end-to-end generation through the
 Phase 2/3 DPO-branched shape-SLat sampling, handing the result to the
 EXISTING, unmodified print-prep pipeline in trellis_core/printprep/printable.py
 (repair_watertight -> diagnostics -> fidelity -> export_glb_and_stl) rather

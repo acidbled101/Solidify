@@ -145,7 +145,7 @@ def overhang_split(mesh: trimesh.Trimesh, theta_crit_deg: float = 45.0,
     to the plate.
 
     NOTE: the missing bed test is a real defect in the shipping judge, not just
-    in this experiment -- see report/flow_dpo_theory.md.
+    in this experiment -- see experiments/dpo_inference_steering/THEORY.md.
     """
     if len(mesh.faces) == 0:
         return 0.0, 0.0

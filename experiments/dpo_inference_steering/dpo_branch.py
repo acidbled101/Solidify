@@ -1,5 +1,5 @@
 """
-Phase 2/3 of 3D_PRINTING_AWARE_PIPELINE.md: flow-matching interception plus a
+Phase 2/3 of experiments/dpo_inference_steering/DESIGN_NOTE.md: flow-matching interception plus a
 DreamDPO-style, inference-time preference step on the shape-SLat trajectory.
 
 This module is a drop-in alternative to
