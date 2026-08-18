@@ -181,7 +181,7 @@ def _run_printable(pipeline: str, *, glb_path: str, output_prefix: str, notes=No
     """
     if pipeline in ("v2", "v3"):
         try:
-            from trellis_core.printable_v2 import run_make_printable_v2
+            from trellis_core.printprep.printable_v2 import run_make_printable_v2
 
             return run_make_printable_v2(
                 glb_path=glb_path,
@@ -198,7 +198,7 @@ def _run_printable(pipeline: str, *, glb_path: str, output_prefix: str, notes=No
                 "Install the extras with: pip install -e \".[postproc-v2]\"", pipeline, e,
             )
 
-    from trellis_core.printable import run_make_printable
+    from trellis_core.printprep.printable import run_make_printable
 
     return run_make_printable(
         glb_path=glb_path,

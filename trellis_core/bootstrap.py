@@ -44,11 +44,19 @@ def configure_env_and_paths():
         sys.path.insert(0, trellis_dir)
     if stubs_dir not in sys.path:
         sys.path.append(stubs_dir)
-    # Repo root itself: lets modules do `import mesh_io` / `import backends...`
-    # regardless of which script is the actual process entrypoint (e.g. when
-    # server/main.py is the entrypoint, not generate.py/make_printable.py).
+    # Repo root itself: lets modules resolve top-level packages regardless of
+    # which script is the actual process entrypoint (e.g. when server/main.py
+    # is the entrypoint, not generate.py/make_printable.py).
     if _REPO_ROOT not in sys.path:
         sys.path.append(_REPO_ROOT)
+    # third_party/ holds the upstream Apple Silicon port (see THIRD_PARTY.md).
+    # Putting it on the path rather than rewriting its imports is deliberate:
+    # `import backends.texture_baker` keeps resolving exactly as upstream wrote
+    # it, so those files stay byte-identical to what they were forked from and
+    # `git diff -M` against the fork point stays empty.
+    third_party_dir = os.path.join(_REPO_ROOT, "third_party")
+    if third_party_dir not in sys.path:
+        sys.path.append(third_party_dir)
 
     _configured = True
 

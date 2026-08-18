@@ -95,7 +95,7 @@ SKIP_PRINTABLE_BY_DEFAULT = _as_bool(os.environ.get("TRELLIS_SKIP_PRINTABLE", "0
 # default. v1 stays selectable per job (and via TRELLIS_PRINTABLE_PIPELINE) as
 # the fallback: it needs only trimesh, while v2/v3 need the optional
 # pymeshlab/manifold3d/meshlib extras.
-#   v1 -- trellis_core/printable.py: trimesh repair + voxel flood-fill
+#   v1 -- trellis_core/printprep/printable.py: trimesh repair + voxel flood-fill
 #   v2 -- printable_v2.py: PyMeshLab clean/Taubin + Manifold3D
 #   v3 -- printable_v2.py with MeshLib orientation repair + SDF rebuild
 PRINTABLE_PIPELINE = os.environ.get("TRELLIS_PRINTABLE_PIPELINE", "v3")

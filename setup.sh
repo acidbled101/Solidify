@@ -114,7 +114,7 @@ fi
 
 # Apply source patches (this also installs stubs and backends)
 echo "Applying MPS compatibility patches..."
-python3 patches/mps_compat.py
+python3 third_party/patches/mps_compat.py
 
 # Check HuggingFace auth
 echo

@@ -20,7 +20,7 @@ Make a .glb mesh more 3D-print-friendly:
 Objects keep their original orientation (no auto-reorientation).
 
 This is a thin CLI wrapper: the print-prep pipeline lives in
-trellis_core/printable.py so it can be reused by the web server. run_make_printable
+trellis_core/printprep/printable.py so it can be reused by the web server. run_make_printable
 keeps every progress/diagnostics/fidelity print, so CLI stdout is unchanged.
 """
 
@@ -29,7 +29,7 @@ import os
 import sys
 import time
 
-import trellis_core.printable as printable
+import trellis_core.printprep.printable as printable
 
 
 def main():

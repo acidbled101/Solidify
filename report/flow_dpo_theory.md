@@ -1,9 +1,9 @@
 # Preference alignment for continuous flow models
 
-Companion note to `report.tex` and `trellis_core/flow_dpo.py`. Covers two
+Companion note to `report.tex` and `experiments/dpo_inference_steering/flow_dpo.py`. Covers two
 questions: *why* DPO can be applied to a flow model at all, and *whether*
 preference alignment is the right tool for FDM printability. Every quantitative
-claim below is produced by `devlab/alignment_experiment.py` (seed 0, 104 s) or
+claim below is produced by `experiments/dpo_inference_steering/inspector/alignment_experiment.py` (seed 0, 104 s) or
 `trellis_core/flow_dpo_test.py` (14 tests), and is reproducible from a clean
 checkout.
 
@@ -281,7 +281,7 @@ latent generation**, not specifically for DPO.
 Section 2 measured the alignment *mechanism* on a toy. This measures the thing
 that actually ships, on the traces already on disk, with **zero new GPU time**.
 
-`devlab/metrics.py` flattens every run into per-fork rows. Each fork is an
+`experiments/dpo_inference_steering/inspector/metrics.py` flattens every run into per-fork rows. Each fork is an
 independent trial of the same question, which is what turns a pile of n=1 runs
 into a usable sample. The decisive column is `verdict_flipped`: `dpo_branch`
 already records the judge's verdict on the **random** perturbation
@@ -321,8 +321,8 @@ costs 10 flow forwards, 3 of them with backward; best-of-5 costs 10 forwards
 and zero backwards, needs no gradient checkpointing, and can use the fast conv
 backend throughout.
 
-Reproduce: `python devlab/metrics.py --print`, or open the Concept Proof page's
-"Every run, pooled" panel. Raw rows are in `devlab/traces/metrics_branches.csv`.
+Reproduce: `python experiments/dpo_inference_steering/inspector/metrics.py --print`, or open the Concept Proof page's
+"Every run, pooled" panel. Raw rows are in `experiments/dpo_inference_steering/inspector/traces/metrics_branches.csv`.
 
 ---
 
@@ -347,6 +347,6 @@ Reproduce: `python devlab/metrics.py --print`, or open the Concept Proof page's
 
 ```bash
 python trellis_core/flow_dpo_test.py        # 14 tests
-python devlab/alignment_experiment.py       # ~104 s, writes concept_data.json
+python experiments/dpo_inference_steering/inspector/alignment_experiment.py       # ~104 s, writes concept_data.json
 python -m devlab.server                     # dashboard at /concept
 ```

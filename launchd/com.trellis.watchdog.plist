@@ -13,7 +13,7 @@
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
-        <string>/Users/scifablab/trellis-mac/trellis-mac/watchdog.sh</string>
+        <string>/Users/scifablab/trellis-mac/trellis-mac/launchd/watchdog.sh</string>
     </array>
 
     <key>WorkingDirectory</key>
