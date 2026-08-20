@@ -26,7 +26,7 @@
     phase: "idle",                // idle | uploaded | busy | warming | running | success | error
     photoSrc: null, photoName: "", photoSize: "", photoFile: null,
     seed: "", detail: 1000000, quality: "standard", skipPrep: false, skipTexture: false,
-    printablePipeline: "v3", advOpen: false,
+    printablePipeline: "v0", advOpen: false,
     modelVariant: "tuned", adapterAvailable: true,
     previewName: "", formingSrc: null, progDetail: "",
     jobProgress: null, repairSeen: 0, repairMax: 0,
@@ -646,6 +646,7 @@
           '</select></label>' +
         '<label style="display:flex;flex-direction:column;gap:8px"><span style="font-family:\'IBM Plex Mono\',monospace;font-size:10px;letter-spacing:.22em;color:#57c9bf">PRINT-PREP PIPELINE</span>' +
           '<select data-model="printablePipeline" style="background:rgba(4,28,26,.85);border:1px solid rgba(53,242,226,.25);color:#EAFDFB;padding:10px 12px;font-family:\'IBM Plex Mono\',monospace;font-size:13px;outline:none;max-width:320px">' +
+            '<option value="v0"' + (state.printablePipeline === "v0" ? " selected" : "") + '>v4</option>' +
             '<option value="v3"' + (state.printablePipeline === "v3" ? " selected" : "") + '>v3 — MeshLib (recommended)</option>' +
             '<option value="v2"' + (state.printablePipeline === "v2" ? " selected" : "") + '>v2 — PyMeshLab + Manifold3D</option>' +
             '<option value="v1"' + (state.printablePipeline === "v1" ? " selected" : "") + '>v1 — original (voxel fill)</option>' +
@@ -1205,13 +1206,14 @@
     if (ms.vertices != null) rows.push(["Vertices", num(ms.vertices)]);
     if (ms.faces != null) rows.push(["Faces", num(ms.faces)]);
     if (result.dimensions_mm) rows.push(["Size", result.dimensions_mm]);
-    rows.push(["Watertight", result.watertight === false ? "NO (prep skipped)" : (result.watertight ? "YES" : "—")]);
+    rows.push(["Watertight", result.watertight === false ? (state.skipPrep ? "NO (prep skipped)" : "NO") : (result.watertight ? "YES" : "—")]);
     var exts = files.map(function (f) { return String(f.filename).split(".").pop().toUpperCase(); });
     rows.push(["Files", exts.length ? exts.join(" · ") : "STL · GLB"]);
     state.infoRows = rows;
 
     var d = job.diagnostics || {}; var diag = [];
-    if (result.watertight === false || state.skipPrep) diag.push(["△", "warn", "Print-prep was skipped — mesh is not watertight. Re-run with prep on before printing."]);
+    if (state.skipPrep) diag.push(["△", "warn", "Print-prep was skipped — mesh is not watertight. Re-run with prep on before printing."]);
+    else if (result.watertight === false) diag.push(["△", "warn", "Not watertight — a slicer may reject this mesh. Re-run with pipeline v3 for a sealed result."]);
     else diag.push(["✓", "ok", "Watertight — sealed and ready to slice."]);
     if (d.thin_wall_warnings != null) {
       if (d.thin_wall_warnings > 0) diag.push(["△", "warn", d.thin_wall_warnings + " thin-wall warning(s)" + (d.thin_wall_threshold_mm ? " (below " + d.thin_wall_threshold_mm + " mm)" : "") + "."]);

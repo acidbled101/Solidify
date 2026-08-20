@@ -95,11 +95,20 @@ SKIP_PRINTABLE_BY_DEFAULT = _as_bool(os.environ.get("TRELLIS_SKIP_PRINTABLE", "0
 # default. v1 stays selectable per job (and via TRELLIS_PRINTABLE_PIPELINE) as
 # the fallback: it needs only trimesh, while v2/v3 need the optional
 # pymeshlab/manifold3d/meshlib extras.
+#   v0 -- printable_v0.py: the unmodified 14 Jul make_printable.py, surfaced
+#         in the UI as "v4". Auto-orients (nothing later does) and runs far
+#         coarser (pitch /256, 200K faces), so it is ~5x faster and ~10x
+#         smaller than v3. It decimates after repairing without re-checking,
+#         so its output is often NOT watertight -- see the default below.
 #   v1 -- trellis_core/printprep/printable.py: trimesh repair + voxel flood-fill
 #   v2 -- printable_v2.py: PyMeshLab clean/Taubin + Manifold3D
 #   v3 -- printable_v2.py with MeshLib orientation repair + SDF rebuild
-PRINTABLE_PIPELINE = os.environ.get("TRELLIS_PRINTABLE_PIPELINE", "v3")
-ALLOWED_PRINTABLE_PIPELINES = ("v1", "v2", "v3")
+# Default is the v0 pipeline (shown in the UI as "v4"). It is fast and keeps a
+# face count close to the raw mesh, but it decimates after repairing without
+# re-checking, so its output is frequently NOT watertight -- the results panel
+# tells the user to re-run on v3 when that happens.
+PRINTABLE_PIPELINE = os.environ.get("TRELLIS_PRINTABLE_PIPELINE", "v0")
+ALLOWED_PRINTABLE_PIPELINES = ("v0", "v1", "v2", "v3")
 
 # --- Server / networking ----------------------------------------------------
 HOST = os.environ.get("TRELLIS_HOST", "0.0.0.0")

@@ -170,15 +170,60 @@ class LiveNotes(list):
 _RUNG_RE = re.compile(r"^\[rung (\d+)/(\d+)\]\s*(.*)", re.S)
 
 
+def _run_v0(glb_path, output_prefix, notes):
+    """The 14 July script, run unmodified.
+
+    Deliberately NOT given config.PRINTABLE_TARGET_FACES: its own 200K/pitch-256
+    defaults are the difference this pipeline exists to show.
+    """
+    from trellis_core.printprep.printable_v0 import run_make_printable_v0
+
+    return run_make_printable_v0(
+        glb_path=glb_path,
+        output_prefix=output_prefix,
+        overhang_angle=config.PRINTABLE_OVERHANG_ANGLE,
+        solid_infill=config.PRINTABLE_SOLID_INFILL,
+        notes=notes,
+    )
+
+
 def _run_printable(pipeline: str, *, glb_path: str, output_prefix: str, notes=None):
-    """Run the requested print-prep pipeline; degrade to v1 rather than fail.
+    """Run the requested print-prep pipeline, with v0 as the final safety net.
 
     v2/v3 need optional extras (pymeshlab, manifold3d, meshlib). If they are not
     installed on this machine, a job must still produce a printable file -- so an
-    ImportError falls back to v1, which needs only trimesh. Any OTHER exception
-    propagates: a genuine geometry failure should surface as a job error, not be
-    silently papered over with a worse result.
+    ImportError falls back to v1, which needs only trimesh.
+
+    Below that sits v0. printable_v2's own ladder ends by raising
+    "Manifold3D rejected even the remeshed geometry", and v1 can throw on
+    degenerate input too; either way the job used to die with no output at all.
+    v0 is a different program, not another rung of the same one -- older trimesh
+    repair, a coarser voxel pitch, its own orient/export -- so it can succeed
+    where the modern stack has exhausted itself. Its output is usually NOT
+    watertight, which is why it is the last resort and not a rung higher up:
+    a coarse unsealed mesh beats an empty download, but loses to a sealed one.
+
+    Selecting v0 directly takes the no-fallback path: a job asked for the
+    July script should return the July script's result or fail saying so.
     """
+    if pipeline == "v0":
+        return _run_v0(glb_path, output_prefix, notes)
+
+    try:
+        return _run_modern(pipeline, glb_path, output_prefix, notes)
+    except Exception as e:  # noqa: BLE001
+        msg = (f"[last resort] {pipeline} could not produce a printable mesh "
+               f"({type(e).__name__}: {e}); falling back to the 14 Jul pipeline "
+               f"(v0). Quality: coarser, and the result may not be watertight -- "
+               f"check it in a slicer before printing.")
+        log.warning("Job print-prep %s failed (%s); falling back to v0", pipeline, e)
+        if notes is not None:
+            notes.append(msg)
+        return _run_v0(glb_path, output_prefix, notes)
+
+
+def _run_modern(pipeline, glb_path, output_prefix, notes):
+    """v1/v2/v3, with v2/v3 degrading to v1 when their extras are missing."""
     if pipeline in ("v2", "v3"):
         try:
             from trellis_core.printprep.printable_v2 import run_make_printable_v2
