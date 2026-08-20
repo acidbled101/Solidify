@@ -86,3 +86,7 @@ data/thingi10k_sft/*
 # Reports and slides: kept locally, not tracked.
 report/
 presentation/
+
+# Reference snapshots of older print-prep versions: kept locally, not tracked.
+printprep_20260728/
+printprep_20260729/
