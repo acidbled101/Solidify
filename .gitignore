@@ -82,3 +82,7 @@ data/thingi10k_sft/*
 # GitHub renders it in 3D in-browser.
 !presentation/assets/*.glb
 !presentation/assets/*.stl
+
+# Reports and slides: kept locally, not tracked.
+report/
+presentation/
