@@ -40,10 +40,11 @@ import numpy as np
 import trimesh
 
 # The unmodified 14 July tree: make_printable.py + the mesh_io.py it imports.
-JULY_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-    "printprep_20260714",
-)
+# It lives inside the package but is NOT a package itself (no __init__.py) and
+# must not become one: make_printable.py does a top-level `import mesh_io`, so
+# both files have to be loadable as plain modules off sys.path, exactly as they
+# were on 14 July.
+JULY_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "july14")
 
 _module = None
 _lock = threading.Lock()
